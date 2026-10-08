@@ -243,6 +243,15 @@ def _column_widths(model):
     return widths
 
 
+def _column_alignments(model):
+    """列の 1 列分のセルがすべて同じ配置なら、その配置（無ければ None）。"""
+    result = []
+    for col in range(model.cols):
+        aligns = {cell.align for cell in model.cells if cell.col == col and cell.colspan == 1}
+        result.append(aligns.pop() if len(aligns) == 1 else None)
+    return result
+
+
 def _write_table_sheet(openpyxl, ws, model, family):
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -253,6 +262,7 @@ def _write_table_sheet(openpyxl, ws, model, family):
     header_font = Font(name=family, size=FONT_SIZE, bold=True)
     header_fill = PatternFill(fill_type="solid", fgColor=HEADER_FILL)
     widths = _column_widths(model)
+    aligns = _column_alignments(model)
 
     for index in range(model.cols + 5):
         letter = get_column_letter(index + 1)
@@ -260,13 +270,16 @@ def _write_table_sheet(openpyxl, ws, model, family):
         dimension.width = widths[index] if index < len(widths) else 8
         dimension.number_format = "@"
         dimension.font = body_font
-        dimension.alignment = Alignment(wrap_text=True, vertical="top")
+        # 表の下の行に入力したセルも、列の配置になるようにする
+        dimension.alignment = Alignment(wrap_text=True, vertical="top",
+                                        horizontal=aligns[index] if index < len(aligns) else None)
 
-    covered = set()
+    # 結合を先にする。結合で隠れるセルにも下で書式を付け、結合を解いても文字列の書式のままにする
     for cell in model.cells:
-        for r in range(cell.row, cell.row + cell.rowspan):
-            for c in range(cell.col, cell.col + cell.colspan):
-                covered.add((r, c))
+        if cell.rowspan > 1 or cell.colspan > 1:
+            ws.merge_cells(start_row=cell.row + 1, start_column=cell.col + 1,
+                           end_row=cell.row + cell.rowspan, end_column=cell.col + cell.colspan)
+
     for row in range(model.rows):
         for col in range(model.cols):
             target = ws.cell(row=row + 1, column=col + 1)
@@ -289,9 +302,6 @@ def _write_table_sheet(openpyxl, ws, model, family):
                 part.alignment = alignment
                 if cell.header:
                     part.fill = header_fill
-        if cell.rowspan > 1 or cell.colspan > 1:
-            ws.merge_cells(start_row=cell.row + 1, start_column=cell.col + 1,
-                           end_row=cell.row + cell.rowspan, end_column=cell.col + cell.colspan)
 
     # 結合を含む行は Excel が高さを自動で合わせないので見積もる
     heights = {}
@@ -370,7 +380,8 @@ def _write_index(openpyxl, ws, md_path, tables, excluded, family):
         cell.font = bold if index == 0 else normal
         cell.data_type = "s"
         row += 1
-    widths = [6, 28, 14, 12, 30, 14, 40]
+    # 1 列目は表の番号だが、A1 の「Markdown」が切れない幅にする
+    widths = [10, 28, 14, 12, 30, 14, 40]
     for col, width in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
     for line in ws.iter_rows(min_row=4, max_row=row):

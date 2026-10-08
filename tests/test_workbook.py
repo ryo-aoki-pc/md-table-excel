@@ -304,6 +304,49 @@ class ExportImportTest(unittest.TestCase):
         self.assertFalse(report.changed)
         self.assertTrue(any("適用済み" in m for m in report.messages))
 
+    def test_applied_twice_after_normalizing(self):
+        # 表の下に足した行のセルの配置が列と違う（多いほうにそろえる）、セルの文字が収束する形に
+        # 直る（- y⏎z → - y⏎  z）のどちらがあっても、もう一度取り込むと「適用済み」
+        write(self.md, "| a | b |\n|---|:---:|\n| 1 | 2 |\n")
+        self.export()
+        edit_sheet(self.xlsx, self.sheet(1), {"A3": "x", "B3": "- y\nz"})
+        report = sync.import_workbook(self.xlsx)
+        self.assertEqual(report.errors, [])
+        self.assertTrue(any("配置が混在" in w for w in report.warnings))
+        self.assertIn("| x | <ul><li>y<br>z</li></ul> |", read(self.md))
+        after = read(self.md)
+        report = sync.import_workbook(self.xlsx)
+        self.assertEqual(report.errors, [])
+        self.assertFalse(report.changed)
+        self.assertTrue(any("適用済み" in m for m in report.messages))
+        self.assertEqual(read(self.md), after)
+
+    def test_merged_cells_keep_text_format(self):
+        # 結合で隠れるセルも、左上のセルと同じ書式（文字列の書式）にする。Excel で結合を解いて
+        # 入力しても文字列のまま。openpyxl は読むときに隠れるセルの書式を捨てるので、XML で確かめる
+        write(self.md, '<table>\n<tr><th rowspan="2">a</th><th>b</th></tr>\n<tr><td>c</td></tr>\n</table>\n')
+        self.export()
+        with zipfile.ZipFile(self.xlsx) as book:
+            sheet = book.read("xl/worksheets/sheet2.xml").decode("utf-8")
+            styles = book.read("xl/styles.xml").decode("utf-8")
+        self.assertIn('<mergeCell ref="A1:A2"', sheet)
+        top = re.search(r'<c r="A1" s="(\d+)"', sheet).group(1)
+        covered = re.search(r'<c r="A2" s="(\d+)"', sheet).group(1)
+        self.assertEqual(covered, top)
+        xfs = re.findall(r"<xf [^>]*>", re.search(r"<cellXfs[^>]*>(.*?)</cellXfs>", styles, re.S).group(1))
+        self.assertIn('numFmtId="49"', xfs[int(covered)])
+        report = sync.import_workbook(self.xlsx)
+        self.assertEqual(report.errors, [])
+        self.assertFalse(report.changed)
+
+    def test_column_style_alignment(self):
+        # パイプ表の列の配置を列のスタイルにも付け、表の下の行に入力したセルも同じ配置にする
+        write(self.md, "| a | b |\n|---|:---:|\n| 1 | 2 |\n")
+        self.export()
+        sheet = openpyxl.load_workbook(self.xlsx)[self.sheet(1)]
+        self.assertEqual(sheet.column_dimensions["B"].alignment.horizontal, "center")
+        self.assertIsNone(sheet.column_dimensions["A"].alignment.horizontal)
+
     def test_line_endings_and_bom(self):
         # C4・D17: 改行コードと BOM を保ち、改行コードを変えても衝突しない
         text = SAMPLE.replace("\n", "\r\n")
