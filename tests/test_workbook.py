@@ -10,7 +10,7 @@ import zipfile
 from unittest import mock
 from xml.sax.saxutils import escape
 
-import helpers  # noqa: F401
+import helpers
 
 import openpyxl
 
@@ -320,6 +320,45 @@ class ExportImportTest(unittest.TestCase):
         self.assertFalse(report.changed)
         self.assertTrue(any("適用済み" in m for m in report.messages))
         self.assertEqual(read(self.md), after)
+
+    def test_many_tables_with_body(self):
+        # 本文と 7 つの表がある見本（docs/verification/multi-tables.md）で 5 つの表を編集しても、
+        # 表の外の行（足した空行を除く）と、編集していない表は 1 文字も変わらない
+        with open(os.path.join(helpers.ROOT, "docs", "verification", "multi-tables.md"),
+                  encoding="utf-8", newline="") as handle:
+            original = handle.read()
+        write(self.md, original)
+        self.export()
+        edit_sheet(self.xlsx, self.sheet(1), {"B3": "0.2.0", "A4": "フォント", "B4": "HackGen Console NF",
+                                              "C4": "- 入っていれば使う\n- 無ければ BIZ UDゴシック"})
+        edit_sheet(self.xlsx, self.sheet(2), {"B2": "`python scripts/setup-mdtable.py`\n（リポジトリの外に入れる）"})
+        edit_sheet(self.xlsx, self.sheet(3), {"B3": "セル結合ができる\n\n```html\n<td rowspan=\"2\">結合</td>\n```"})
+        edit_sheet(self.xlsx, self.sheet(4), {"C3": "```sh\nsudo dnf install -y epel-release\n```",
+                                              "C4": "ln\n: シンボリックリンクを作る"})
+        edit_sheet(self.xlsx, self.sheet(5), {"B2": "編集（**Excel** で開く）"})
+        report = sync.import_workbook(self.xlsx)
+        self.assertEqual(report.errors, [])
+        edited = read(self.md)
+
+        def split(text):
+            regions = helpers.regions(text)
+            lines = text.split("\n")
+            covered = {i for r in regions for i in range(r.start, r.end + 1)}
+            outside = [line for i, line in enumerate(lines) if i not in covered and line.strip()]
+            tables = ["\n".join(lines[r.start:r.end + 1]) for r in regions]
+            return outside, tables, [r.kind for r in regions]
+
+        outside_before, tables_before, _ = split(original)
+        outside_after, tables_after, kinds = split(edited)
+        self.assertEqual(outside_after, outside_before)
+        self.assertEqual(len(tables_after), 7)
+        self.assertEqual([i + 1 for i in range(7) if tables_before[i] != tables_after[i]], [1, 2, 3, 4, 5])
+        self.assertEqual(kinds, ["pipe", "pipe", "html", "html", "pipe", "pipe", "pipe"])
+        # HTML にした表 3 の直後のリストは、空行を足してリストのまま
+        self.assertIn("</table>\n\n- 表のすぐ後のリスト（空行なし）", edited)
+        report = sync.import_workbook(self.xlsx)
+        self.assertFalse(report.changed)
+        self.assertEqual(len([m for m in report.messages if "適用済み" in m]), 5)
 
     def test_merged_cells_keep_text_format(self):
         # 結合で隠れるセルも、左上のセルと同じ書式（文字列の書式）にする。Excel で結合を解いて
