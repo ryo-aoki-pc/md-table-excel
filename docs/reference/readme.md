@@ -76,7 +76,7 @@ comrak の主な規則:
 
 ## 制限
 
-- Excel 実機（この形式のブックを Excel で開いて保存したときの挙動）は未検証です（[検証記録](../verification/readme.md)の確認の手順）
+- Excel 実機（Windows の Excel 2021）では、開く・入力・行の挿入・シート名の変更・結合の解除・保存・`edit` を COM で確かめました。キー入力に固有の動き（オートコレクトなど）と、Excel for the web・Excel for Mac・LibreOffice は未検証です（[検証記録](../verification/readme.md)）
 - セルの一部だけの書式や色は書き戻しません
 - HTML の表で、中身も変えたセルの属性（`align` 以外）は、表を作り直したときに引き継げません（警告を出します）
 - 文字の `_x000D_` はセルに書けません（Excel が改行に変えるため）
