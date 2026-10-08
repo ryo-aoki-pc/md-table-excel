@@ -214,10 +214,12 @@ def _render_inline_element(element, context, flags, depth):
         if not inner.strip(" "):
             return inner
         return context.placeholder(inner, EMPHASIS[tag], element.start_text, "</%s>" % tag, depth)
-    if tag == "code" and not element.attributes and _only_text(element):
-        span = _code_span(html.unescape(_text_of(element)))
-        if span is not None:
-            return span
+    if tag == "code":
+        if not element.attributes and _only_text(element):
+            span = _code_span(html.unescape(_text_of(element)))
+            if span is not None:
+                return span
+        # 中に要素がある・属性があるコードは、元の HTML のまま
         return context.raw(element)
     if tag == "a":
         names = {a.name for a in element.attributes}

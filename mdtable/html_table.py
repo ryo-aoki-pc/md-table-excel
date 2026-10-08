@@ -47,9 +47,11 @@ def _locate(starts, position):
 def _chunk_has_structural(md, node):
     """Markdown の部分のブロックに、コードの外の表の構造のタグがあるか。"""
     for sub in node.walk():
-        if sub.kind == blocks.CODE_BLOCK:
+        if sub.kind == blocks.CODE_BLOCK and sub.info.get("fenced"):
+            # フェンスの中は意図して書いたコード
             continue
-        if sub.kind in (blocks.PARAGRAPH, blocks.HEADING, blocks.HTML_BLOCK):
+        if sub.kind in (blocks.PARAGRAPH, blocks.HEADING, blocks.HTML_BLOCK, blocks.CODE_BLOCK):
+            # 字下げのコードブロックに入った </td> などは、字下げのしすぎで崩れたもの
             text = "\n".join(md.lines[n][o:] for n, o, _lazy in sub.lines)
             for token in inline.tokenize(text):
                 if token.kind == "html" and token.tag in STRUCTURAL:
@@ -475,6 +477,17 @@ def _parse_structure(table, tokens):
         raise NotRepresentable("<tfoot> が <tbody> の前にある（表示の順が元の順と違う）")
 
 
+def _check_markdown_parents(tree):
+    """<pre> などの中に空行があって Markdown の部分になっていたら、GitLab でも崩れているので対象外にする。"""
+    def walk(element, inside):
+        for child in element.children:
+            if isinstance(child, htmltok.Markdown) and inside:
+                raise NotRepresentable("<%s> の中に空行がある（GitLab でも崩れる）" % inside)
+            if isinstance(child, htmltok.Element):
+                walk(child, inside or (child.tag if child.tag in ("pre", "code", "textarea") else None))
+    walk(tree, None)
+
+
 def _build_grid(table):
     occupied = {}
     row_index = 0
@@ -518,6 +531,7 @@ def _build_grid(table):
     model_cells = []
     for cell in table.cells:
         tree = htmltok.build_tree(cell.tokens)
+        _check_markdown_parents(tree)
         cell.text = convert_cell(tree.children, table.text)
         align, by_style = _cell_align(cell)
         if by_style:

@@ -221,7 +221,7 @@ def to_pipe_cell(text):
 
 # --- HTML の表のセル ---
 
-_PLAIN_FORBIDDEN = re.compile(r"[\`*_~\[\]<>&$]")
+_PLAIN_FORBIDDEN = re.compile(r"[\\`*_~\[\]<>&$]")
 _STRUCTURAL_TAGS = frozenset(["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "td", "th"])
 _HTML_BLOCK_END = {
     1: re.compile(r"</(?:script|pre|textarea|style)>", re.I),
