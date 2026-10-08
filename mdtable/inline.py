@@ -227,10 +227,10 @@ def delimiters_work(before, inner, after, marker):
         return False
     first = inner[0]
     last = inner[-1]
-    if marker[0] in (first, last, before, after) or first in "*_~" or last in "*_~":
-        return False
-    if before in "*_~" or after in "*_~":
-        return False
+    # 隣や内側の端が区切りの記号だと、区切りの連なりがつながってしまう
+    for ch in (first, last, before, after):
+        if ch and ch in "*_~":
+            return False
     for symbols in (False, True):
         open_left, open_right = _flanking(before, first, symbols)
         close_left, close_right = _flanking(last, after, symbols)

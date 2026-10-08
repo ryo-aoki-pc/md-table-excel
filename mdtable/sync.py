@@ -263,7 +263,9 @@ def verify(md, new_text, replacements):
     new_regions = find_tables(new_md)
     for replacement, (start, end) in zip(ordered, new_ranges):
         region = replacement.region
-        found = [r for r in new_regions if r.start == start and r.end == end]
+        # HTML の表にしたときに後ろへ足した空行は、表の範囲に入らない
+        found = [r for r in new_regions if r.start == start and r.end <= end
+                 and all(not new_md.lines[i].strip(" \t>") for i in range(r.end + 1, end + 1))]
         if not found:
             problems.append("表 %d: 書き戻した表を読み直せない" % region.number)
             continue

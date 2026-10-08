@@ -76,6 +76,7 @@ class TableRegion(object):
         self.container = None     # 表を含むコンテナの節
         self.parsed = None        # 種類ごとの解析結果
         self.tight_container = False
+        self.next_nonblank = False
 
     @property
     def first_prefix(self):
@@ -190,10 +191,16 @@ def find_tables(md):
     regions.extend(html_table.find_regions(md))
     regions.sort(key=lambda r: r.start)
     headings = _headings(md)
+    infos = md.doc.line_infos
     for number, region in enumerate(regions, 1):
         region.number = number
         region.location = describe_location(region.container, region.cont_prefix)
         region.tight_container = _container_is_tight(region.container)
+        # 表の次の行が、同じコンテナの空でない行か（HTML の表にしたときに空行を足す）
+        following = region.end + 1
+        offset = infos[following].offset_after(region.container) \
+            if following < len(md.lines) and region.container is not None else None
+        region.next_nonblank = offset is not None and md.lines[following][offset:].strip() != ""
         before = [text for start, end, text in headings if end < region.start]
         region.heading = before[-1] if before else ""
         if region.excluded is None:

@@ -9,6 +9,7 @@
 import re
 
 from . import blocks, inline
+from .model import normalize_text
 
 
 class NotRepresentable(Exception):
@@ -216,3 +217,183 @@ def to_pipe_cell(text):
     doc = parse(text)
     rendered = _render_pipe_blocks(doc, doc.root.children)
     return escape_pipes(rendered).strip(" \t")
+
+
+# --- HTML の表のセル ---
+
+_PLAIN_FORBIDDEN = re.compile(r"[\`*_~\[\]<>&$]")
+_STRUCTURAL_TAGS = frozenset(["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "td", "th"])
+_HTML_BLOCK_END = {
+    1: re.compile(r"</(?:script|pre|textarea|style)>", re.I),
+    2: re.compile(r"-->"),
+    3: re.compile(r"\?>"),
+    4: re.compile(r">"),
+    5: re.compile(r"\]\]>"),
+}
+_RELAXED_TASK = re.compile(r"\[([^\]\s])\](?=[ \t]|$)")
+
+
+def is_plain(text):
+    """Markdown の記号もブロックの記法も無い文字か（<td>文字</td> の 1 行で書ける）。"""
+    if not text or _PLAIN_FORBIDDEN.search(text):
+        return False
+    for line in text.split("\n"):
+        if not line or line != line.strip(" \t\u3000"):
+            return False
+        if inline.escape_line_start(line) != line:
+            return False
+    return True
+
+
+def _paragraph_like(doc):
+    """段落と同じく、中の改行が表示上の改行にならない（空白になる）ブロック。"""
+    for node in doc.root.walk():
+        if node.kind == blocks.PARAGRAPH:
+            yield node
+        elif node.kind == blocks.HEADING and node.info.get("setext"):
+            yield node
+
+
+def _line_breaks(doc, node):
+    """段落の中の改行ごとに (行番号, ひとかたまりの中か, 改行マークがあるか)。"""
+    parts = [doc.lines[n][o:] for n, o, _lazy in node.lines]
+    content = "\n".join(parts)
+    spans = inline.atom_spans(content)
+    result = []
+    position = 0
+    for index in range(len(parts) - 1):
+        position += len(parts[index])
+        line_no = node.lines[index][0]
+        in_atom = inline.position_in_spans(position, spans)
+        _stripped, marked = strip_break_marker(doc.lines[line_no])
+        result.append((line_no, in_atom, marked))
+        position += 1
+    return result
+
+
+def _structural_tags_outside(doc, text):
+    """コードの外にある表の構造のタグ（入れ子の完全な <table> の中は除く）。"""
+    code_lines = set()
+    for node in doc.root.walk():
+        if node.kind == blocks.CODE_BLOCK:
+            for line_no in range(node.start_line, node.end_line + 1):
+                code_lines.add(line_no)
+    rest = "\n".join(line if i not in code_lines else "" for i, line in enumerate(doc.lines))
+    depth = 0
+    for token in inline.tokenize(rest):
+        if token.kind != "html" or token.tag not in _STRUCTURAL_TAGS:
+            continue
+        if token.tag == "table":
+            depth += -1 if token.closing else 1
+            if depth < 0:
+                return True
+            continue
+        if depth == 0:
+            return True
+    return depth != 0
+
+
+def to_html_cell(text):
+    """Excel のセルの文字を、HTML の表のセルの中身にする。
+
+    ("inline", 文字) か ("chunk", 行のリスト) と、警告のリストを返す。
+    書けなければ NotRepresentable。
+    """
+    warnings = []
+    if not text:
+        return "inline", "", warnings
+    if is_plain(text):
+        return "inline", "<br>".join(text.split("\n")), warnings
+    doc = parse(text)
+    lines = list(doc.lines)
+    if _structural_tags_outside(doc, text):
+        raise NotRepresentable("セルの中に表の構造のタグ（<td> など）がある")
+    for node in doc.root.walk():
+        if node.kind == blocks.HTML_BLOCK and node.info["block_type"] in _HTML_BLOCK_END:
+            last_line, offset, _lazy = node.lines[-1]
+            if not _HTML_BLOCK_END[node.info["block_type"]].search(lines[last_line][offset:]):
+                raise NotRepresentable("セルの中に閉じていない HTML（<pre>・<!-- など）がある")
+
+    suffix = {}
+    for node in _paragraph_like(doc):
+        for line_no, in_atom, marked in _line_breaks(doc, node):
+            if in_atom or marked:
+                continue
+            body = lines[line_no].rstrip(" ")
+            count = len(body) - len(body.rstrip("\\"))
+            suffix[line_no] = " <br>" if count % 2 == 1 else "<br>"
+    for line_no, ending in suffix.items():
+        lines[line_no] = lines[line_no].rstrip(" ") + ending
+
+    # リンク参照の定義（文書全体に効く）と、GitLab がタスクにする [注] などはエスケープする
+    for node in doc.root.walk():
+        if node.kind == blocks.PARAGRAPH and node.info.get("only_link_definitions"):
+            for line_no, offset, _lazy in node.lines:
+                if lines[line_no][offset:].startswith("["):
+                    lines[line_no] = lines[line_no][:offset] + "\\" + lines[line_no][offset:]
+        if node.kind == blocks.ITEM and node.children and node.children[0].kind == blocks.PARAGRAPH:
+            line_no, offset, _lazy = node.children[0].lines[0]
+            match = _RELAXED_TASK.match(lines[line_no], offset)
+            if match and match.group(1) not in (" ", "x", "X"):
+                lines[line_no] = lines[line_no][:offset] + "\\" + lines[line_no][offset:]
+
+    # 閉じていないフェンスは閉じる
+    closing = []
+    for node in doc.root.walk():
+        if node.kind == blocks.CODE_BLOCK and node.info.get("fenced") and not node.info.get("closed"):
+            # 開きのフェンスと同じ位置（リストの中なら項目の本文の位置）で閉じる
+            indent = " " * node.start_offset
+            closing.append(indent + node.info["fence_char"] * node.info["fence_length"])
+            warnings.append("閉じていないコードブロックを閉じた")
+    lines.extend(reversed(closing))
+
+    # markdownlint の自動修正（MD031・MD032）が入らないよう、一番外側のリストとフェンスの前後に空行を入れる
+    blank_before = set()
+    blank_after = set()
+    children = doc.root.children
+    for index, node in enumerate(children):
+        if node.kind in (blocks.LIST, blocks.CODE_BLOCK) or (
+                node.kind == blocks.CODE_BLOCK and node.info.get("fenced")):
+            if index > 0 and node.start_line > 0 and lines[node.start_line - 1].strip():
+                blank_before.add(node.start_line)
+            if node.kind == blocks.CODE_BLOCK and index + 1 < len(children):
+                following = children[index + 1].start_line
+                if following == node.end_line + 1:
+                    blank_after.add(node.end_line)
+    result = []
+    for index, line in enumerate(lines):
+        if index in blank_before:
+            result.append("")
+        result.append(line)
+        if index in blank_after:
+            result.append("")
+    return "chunk", result, warnings
+
+
+def chunk_to_excel(text):
+    """HTML の表のセルの Markdown の部分を、Excel のセルの文字にする（to_html_cell の逆）。"""
+    doc = parse(text)
+    lines = list(doc.lines)
+    join_next = {}
+    marker_lines = set()
+    next_offset = {}
+    for node in _paragraph_like(doc):
+        for index, (line_no, in_atom, marked) in enumerate(_line_breaks(doc, node)):
+            if marked and not in_atom:
+                marker_lines.add(line_no)
+            else:
+                join_next[line_no] = True
+                next_offset[line_no] = node.lines[index + 1][1]
+    out = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        while join_next.get(index) and index + 1 < len(lines):
+            following = lines[index + 1][next_offset[index]:].lstrip(" \t")
+            line = line.rstrip(" \t") + " " + following
+            index += 1
+        if index in marker_lines:
+            line, _marked = strip_break_marker(line)
+        out.append(line)
+        index += 1
+    return normalize_text("\n".join(out))
