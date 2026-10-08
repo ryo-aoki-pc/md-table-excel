@@ -29,6 +29,7 @@ comrak の主な規則:
 - `_mdtable` には、Markdown の絶対パスと相対パス、表ごとの種類・行範囲・元の表の本文の sha256・書き出した内容の指紋を書く
 - `_xHHHH_` の形の文字は `_x005F_xHHHH_` にして書く（Excel が文字に戻してしまうため）。読むときは逆にし、`_x000D_` + 改行は改行にする
 - 結合を含む行は Excel が高さを自動で合わせないので、内容から見積もる
+- フォントは、書き出す PC に HackGen Console NF（日本語の等幅で、`\` が `¥` に見えない）が入っていればそれ、無ければどの Windows にもある BIZ UDゴシック。Windows はフォントの登録（`HKLM` と `HKCU` の `SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`）、ほかの OS は `fc-list` で調べる。環境変数 `MDTABLE_FONT` があれば、それを使う
 
 ## セルの文字（Excel 側の Markdown）
 

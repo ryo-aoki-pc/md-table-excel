@@ -10,6 +10,8 @@
 import datetime
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import warnings
 
@@ -19,9 +21,10 @@ from .textwidth import text_width, wrapped_line_count
 FORMAT_VERSION = 1
 META_SHEET = "_mdtable"
 INDEX_SHEET = "目次"
-# セルのフォント。日本語の等幅で、どの Windows にもあるもの（\ は ¥ に見える）。
-# 環境変数 MDTABLE_FONT で変えられる（例: HackGen Console NF）
-FONT_NAME = os.environ.get("MDTABLE_FONT") or "BIZ UDゴシック"
+# セルのフォント。HackGen Console NF（日本語の等幅で、\ が ¥ に見えない）が入っていればそれ、
+# 無ければどの Windows にもある BIZ UDゴシック（\ は ¥ に見える）。環境変数 MDTABLE_FONT で変えられる
+PREFERRED_FONT = "HackGen Console NF"
+FALLBACK_FONT = "BIZ UDゴシック"
 FONT_SIZE = 10.5
 HEADER_FILL = "D9D9D9"
 BORDER_COLOR = "A6A6A6"
@@ -99,6 +102,76 @@ def _openpyxl():
     return openpyxl
 
 
+# --- フォント ---
+
+_FONT_KEY = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+_FONT_KIND = re.compile(r"\s*\([^()]*\)\s*$")
+_installed_cache = {}
+
+
+def font_entry_matches(entry, family):
+    """Windows のフォントの登録名（例: HackGen Console NF Bold (TrueType)）が family の書体か。"""
+    family = family.lower()
+    for name in _FONT_KIND.sub("", entry).split("&"):
+        name = name.strip().lower()
+        if name == family or name.startswith(family + " "):
+            return True
+    return False
+
+
+def _registered_fonts():
+    """Windows に登録されたフォントの名前（全ユーザー向けと、自分だけに入れたもの）。"""
+    import winreg
+    names = []
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(root, _FONT_KEY)
+        except OSError:
+            continue
+        with key:
+            index = 0
+            while True:
+                try:
+                    names.append(winreg.EnumValue(key, index)[0])
+                except OSError:
+                    break
+                index += 1
+    return names
+
+
+def _fontconfig_families():
+    command = shutil.which("fc-list")
+    if not command:
+        return []
+    try:
+        result = subprocess.run([command, ":", "family"], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    families = []
+    for line in result.stdout.decode("utf-8", "replace").splitlines():
+        families.extend(part.strip() for part in line.split(","))
+    return families
+
+
+def font_installed(family):
+    """この PC にそのフォントが入っているか（結果は覚えておく）。"""
+    if family not in _installed_cache:
+        if os.name == "nt":
+            found = any(font_entry_matches(entry, family) for entry in _registered_fonts())
+        else:
+            found = family.lower() in [name.lower() for name in _fontconfig_families()]
+        _installed_cache[family] = found
+    return _installed_cache[family]
+
+
+def font_name():
+    """ブックのフォント。MDTABLE_FONT → HackGen Console NF（入っていれば）→ BIZ UDゴシック。"""
+    name = os.environ.get("MDTABLE_FONT")
+    if name:
+        return name
+    return PREFERRED_FONT if font_installed(PREFERRED_FONT) else FALLBACK_FONT
+
+
 def check_cell_text(text):
     """Excel のセルに書けるか。書けなければ理由を返す。"""
     if _ILLEGAL.search(text):
@@ -170,14 +243,14 @@ def _column_widths(model):
     return widths
 
 
-def _write_table_sheet(openpyxl, ws, model):
+def _write_table_sheet(openpyxl, ws, model, family):
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
     side = Side(style="thin", color=BORDER_COLOR)
     border = Border(left=side, right=side, top=side, bottom=side)
-    body_font = Font(name=FONT_NAME, size=FONT_SIZE)
-    header_font = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
+    body_font = Font(name=family, size=FONT_SIZE)
+    header_font = Font(name=family, size=FONT_SIZE, bold=True)
     header_fill = PatternFill(fill_type="solid", fgColor=HEADER_FILL)
     widths = _column_widths(model)
 
@@ -242,13 +315,13 @@ def _write_table_sheet(openpyxl, ws, model):
         ws.freeze_panes = "A%d" % (header_rows + 1)
 
 
-def _write_index(openpyxl, ws, md_path, tables, excluded):
+def _write_index(openpyxl, ws, md_path, tables, excluded, family):
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.worksheet.hyperlink import Hyperlink
 
-    bold = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
-    normal = Font(name=FONT_NAME, size=FONT_SIZE)
-    link_font = Font(name=FONT_NAME, size=FONT_SIZE, color="0563C1", underline="single")
+    bold = Font(name=family, size=FONT_SIZE, bold=True)
+    normal = Font(name=family, size=FONT_SIZE)
+    link_font = Font(name=family, size=FONT_SIZE, color="0563C1", underline="single")
     fill = PatternFill(fill_type="solid", fgColor=HEADER_FILL)
 
     ws["A1"] = "Markdown"
@@ -336,6 +409,7 @@ def write(path, md_path, tables, excluded, tool_version):
     from openpyxl.workbook.defined_name import DefinedName
     from openpyxl.utils import get_column_letter
 
+    family = font_name()
     workbook = openpyxl.Workbook()
     index_sheet = workbook.active
     index_sheet.title = INDEX_SHEET
@@ -343,12 +417,12 @@ def write(path, md_path, tables, excluded, tool_version):
     for table in tables:
         table.sheet_name = sheet_name_for(table.region.number, table.region.heading, used)
         ws = workbook.create_sheet(table.sheet_name)
-        _write_table_sheet(openpyxl, ws, table.model)
+        _write_table_sheet(openpyxl, ws, table.model, family)
         ref = "%s!$A$1:$%s$%d" % (quote_sheet(table.sheet_name),
                                    get_column_letter(max(1, table.model.cols)), max(1, table.model.rows))
         name = NAME_PREFIX + str(table.region.number)
         workbook.defined_names[name] = DefinedName(name, attr_text=ref)
-    _write_index(openpyxl, index_sheet, md_path, tables, excluded)
+    _write_index(openpyxl, index_sheet, md_path, tables, excluded, family)
     meta = workbook.create_sheet(META_SHEET)
     _write_meta(meta, md_path, path, tables, tool_version)
     meta.sheet_state = "veryHidden"

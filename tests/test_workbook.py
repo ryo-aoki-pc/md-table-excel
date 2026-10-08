@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 from xml.sax.saxutils import escape
 
 import helpers  # noqa: F401
@@ -134,6 +135,34 @@ class NormalizeTest(unittest.TestCase):
         self.assertNotEqual(workbook.sheet_name_for(3, "見出し: [とても] 長い/見出し*の名前" * 3, used), name)
 
 
+class FontTest(unittest.TestCase):
+    def test_font_entry_matches(self):
+        family = "HackGen Console NF"
+        for entry in ("HackGen Console NF Regular (TrueType)", "HackGen Console NF Bold (TrueType)",
+                      "Foo & HackGen Console NF (TrueType)", "hackgen console nf"):
+            self.assertTrue(workbook.font_entry_matches(entry, family), entry)
+        for entry in ("HackGen35 Console NF Regular (TrueType)", "HackGen NF Regular (TrueType)",
+                      "HackGen Console NFX Regular (TrueType)", "BIZ UDGothic & BIZ UDPGothic (TrueType)"):
+            self.assertFalse(workbook.font_entry_matches(entry, family), entry)
+
+    def test_font_name(self):
+        # 環境変数が最優先。無ければ HackGen Console NF が入っているかで決める
+        with mock.patch.dict(os.environ, {"MDTABLE_FONT": "Consolas"}):
+            with mock.patch.object(workbook, "font_installed", return_value=True):
+                self.assertEqual(workbook.font_name(), "Consolas")
+        with mock.patch.dict(os.environ):
+            os.environ.pop("MDTABLE_FONT", None)
+            with mock.patch.object(workbook, "font_installed", return_value=True):
+                self.assertEqual(workbook.font_name(), "HackGen Console NF")
+            with mock.patch.object(workbook, "font_installed", return_value=False):
+                self.assertEqual(workbook.font_name(), "BIZ UDゴシック")
+
+    @unittest.skipUnless(os.name == "nt", "Windows のフォントの登録を見る")
+    def test_registered_fonts(self):
+        self.assertFalse(workbook.font_installed("mdtable に無い書体 0123"))
+        self.assertIsInstance(workbook.font_installed(workbook.PREFERRED_FONT), bool)
+
+
 class ExportImportTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="mdtable-test-")
@@ -173,6 +202,16 @@ class ExportImportTest(unittest.TestCase):
         self.assertEqual(sheet["B3"].number_format, "@")
         self.assertTrue(sheet["A1"].font.b)
         self.assertEqual(book[workbook.META_SHEET].sheet_state, "veryHidden")
+
+    def test_font(self):
+        with mock.patch.dict(os.environ, {"MDTABLE_FONT": "Consolas"}):
+            self.export()
+        book = openpyxl.load_workbook(self.xlsx)
+        sheet = book[self.sheet(1)]
+        index = book[workbook.INDEX_SHEET]
+        for cell in (sheet["A1"], sheet["B2"], index["A1"], index["B4"]):
+            self.assertEqual(cell.font.name, "Consolas", cell.coordinate)
+        self.assertEqual(sheet.column_dimensions["A"].font.name, "Consolas")
 
     def test_edit_and_import(self):
         self.export()
