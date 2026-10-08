@@ -121,7 +121,10 @@ def font_entry_matches(entry, family):
 
 def _registered_fonts():
     """Windows に登録されたフォントの名前（全ユーザー向けと、自分だけに入れたもの）。"""
-    import winreg
+    try:
+        import winreg
+    except ImportError:
+        return []
     names = []
     for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
