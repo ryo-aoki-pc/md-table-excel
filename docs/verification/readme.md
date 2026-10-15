@@ -168,14 +168,36 @@ Neovim の Markdown の整形器が、LazyVimStarter の `glfm-format`（`%LOCAL
 
 - `MDTABLE_COMRAK_DIR` だけを設定した自動テストは、120 件のうち 118 件が成功し、2 件を飛ばした（手元の文書の確認）
 - `MDTABLE_CORPUS` も設定すると、120 件のうち 1 件が失敗した。`test_oracles.ComrakTest.test_corpus` で、setup-notes-verification の
-  `docs/verification/shell-terminal.md` の区切り線の行の範囲が comrak と違った（mdtable は 2823 行、comrak は 2823〜2824 行）
-- 同じ失敗は、comrak を前の場所（`nvim-data\glfm-format`、同じ 0.48.0-rc.0）にしても出た。comrak の場所を変えたことではなく、
-  その文書に対する mdtable のブロックの解析の食い違い（この確認では直していない）
+  `docs/verification/shell-terminal.md` の区切り線の行の範囲が comrak と違った（0 から数えて、mdtable は 2823 行、comrak は 2823〜2824 行）
+- 同じ失敗は、comrak を前の場所（`nvim-data\glfm-format`、同じ 0.48.0-rc.0）にしても出た。comrak の場所を変えたことではない。
+  原因と直しは次の節
+
+### shell-terminal.md の食い違いの原因（2026-10-16）
+
+その文書は「`---`（区切り線）、空行、文書の終わり」で終わる。comrak 0.48.0-rc.0 は、入れ物の最後のブロックが区切り線で、後ろに空行
+（引用の中では `>` だけの行）しか無いときだけ、区切り線の終わりを文書の終わりの空行まで延ばす。最小の文書での comrak の行（1 から数える）:
+
+| 文書 | comrak の区切り線 |
+|---|---|
+| `a⏎⏎---⏎` | 3〜3 |
+| `a⏎⏎---⏎⏎`・`a⏎⏎***⏎⏎`・`a⏎⏎___⏎⏎` | 3〜4 |
+| `a⏎⏎---⏎⏎⏎` | 3〜5 |
+| `> ---⏎>⏎` | 1〜2 |
+| `a⏎⏎---⏎⏎b⏎⏎---⏎⏎` | 1 つめは 3〜3、文書の終わりの 2 つめは 7〜8 |
+| `a⏎⏎---⏎⏎<!-- c -->⏎⏎` | 3〜3 |
+
+- 見出し・コード・HTML のブロック・表・段落は、同じ形でも終わりを延ばさなかった
+- CommonMark の区切り線は、いつも 1 行。mdtable は、どの形でも 1 行と読んだ。食い違いは comrak の位置の付け方の癖で、描画には関わらない
+- 表の書き戻しへの影響は無い。区切り線の範囲は表の見分けに使わず、同じ文書の無編集の往復（`CorpusRoundTripTest`）も変更なしだった
+- 直し: 試験の comrak の側の署名で、区切り線の終わりの行を始まりの行にそろえ、上の形の例を 3 つ（`a⏎⏎---⏎⏎`・`> ---⏎>⏎`・
+  `a⏎⏎---⏎⏎b⏎⏎---⏎⏎`）試験の例に足した（下書きは Codex）。足した例は、直しを戻すと 3 つとも落ちた
+- 直した後: Windows で、`MDTABLE_COMRAK_DIR` と `MDTABLE_CORPUS` を設定して 120 件すべてが成功した
+- AlmaLinux 10.2（abiko-pi、aarch64。Python 3.14.8 の使い捨ての仮想環境に openpyxl 3.1.5、Node.js 22.23.2、md-format の作業中のブランチを一時の
+  フォルダーに導入した comrak 0.48.0-rc.0）でも、同じ文書の写しで 120 件のうち 119 件が成功し、1 件（Windows のフォントの登録を見る試験）を飛ばした
 
 ### この確認で未検証のこと
 
-- 上の `shell-terminal.md` の食い違いの原因と、表の書き戻しへの影響
-- AlmaLinux 10 での突き合わせ
+- comrak のほかの版と、GitHub・GitLab の解析器が、区切り線の位置をどう付けるか（描画には関わらないので、確かめていない）
 
 ## Excel 実機での確認の手順
 
