@@ -44,9 +44,15 @@ SAMPLES = [
     "<table>\n<tr>\n<td>\n\n- a\n- b\n\n</td>\n</tr>\n</table>\n",
     "| a \\\\| b |\n|---|---|\n",
     "[^1]: 注\n\n    | x |\n    |---|\n",
+    # 文書の終わりの区切り線 (comrak は終わりの行を、後ろの空行まで延ばす) と、延ばさない形
     "a\n\n---\n\n",
+    "a\n\n***\n\n\n",
     "> ---\n>\n",
+    "> ---\n>\n>\n",
+    "- ---\n\n",
     "a\n\n---\n\nb\n\n---\n\n",
+    "- a\n\n  ---\n\n",
+    "a\n---\n\n",
 ]
 
 
@@ -84,8 +90,8 @@ def comrak_signature(nodes):
             if TYPES.get(nodes[parent]["type"]):
                 chain.append(TYPES[nodes[parent]["type"]])
             parent = nodes[parent]["parent"]
-        # 区切り線はいつも 1 行。comrak は、入れ物の最後のブロックが区切り線で後ろに空行（引用の中では > だけの行）しか
-        # 無いと、終わりを文書の終わりの空行まで延ばすので、始まりの行にそろえる（描画には関わらない）。
+        # 区切り線はいつも 1 行。comrak は、文書の直下か引用の中の最後のブロックが区切り線で、後ろに空行（引用の中では
+        # > だけの行）しか無いと、終わりを文書の終わりの空行まで延ばす（リスト項目の中では延ばさなかった）ので、始まりの行にそろえる。
         end = node["start"] if kind == "thematic_break" else node["end"]
         signature[(kind, node["start"] - 1, end - 1, tuple(chain))] += 1
     return signature
