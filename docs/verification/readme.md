@@ -150,6 +150,31 @@ python -B -m unittest discover -s tests -v
 - mdtable や、それが開いた Excel のブックが動いている間に消すとき（Windows でファイルが使用中になる場合）
 - 使い捨てではない、本物のホームでの実行
 
+## comrak の場所を md-format の導入先にした確認（2026-10-15）
+
+Neovim の Markdown の整形器が、LazyVimStarter の `glfm-format`（`%LOCALAPPDATA%\nvim-data\glfm-format`）から、
+別のリポジトリの [md-format](https://github.com/ryo-aoki-pc/md-format) に移った。comrak の場所の案内を md-format の導入先にしたので、
+そこにある comrak で突き合わせた。
+
+### 環境と対象
+
+- Windows 11 Pro 10.0.26300、mdtable の導入先の仮想環境の Python 3.14.8（openpyxl 入り）、Node.js 26.10.0
+- comrak 0.48.0-rc.0（md-format の導入先。確かめたときは、md-format の作業中のブランチを一時のフォルダーに導入したもの）
+- 手元の文書は、docs のサブモジュール 9 つの `*.md` 224 本と、setup-notes の `almalinux-setup.md` の 15,092 行の版（コミット `89f9712`）
+
+### 結果
+
+- `MDTABLE_COMRAK_DIR` だけを設定した自動テストは、120 件のうち 118 件が成功し、2 件を飛ばした（手元の文書の確認）
+- `MDTABLE_CORPUS` も設定すると、120 件のうち 1 件が失敗した。`test_oracles.ComrakTest.test_corpus` で、setup-notes-verification の
+  `docs/verification/shell-terminal.md` の区切り線の行の範囲が comrak と違った（mdtable は 2823 行、comrak は 2823〜2824 行）
+- 同じ失敗は、comrak を前の場所（`nvim-data\glfm-format`、同じ 0.48.0-rc.0）にしても出た。comrak の場所を変えたことではなく、
+  その文書に対する mdtable のブロックの解析の食い違い（この確認では直していない）
+
+### この確認で未検証のこと
+
+- 上の `shell-terminal.md` の食い違いの原因と、表の書き戻しへの影響
+- AlmaLinux 10 での突き合わせ
+
 ## Excel 実機での確認の手順
 
 Excel のある PC で行い、結果をこの記録に新しい節として足す。Excel が保存したブックの形（共有文字列など）が、テストの `excel_shape`（Excel の保存の形の模擬）と違えば、模擬とテストを直す。ブックそのものは作成者名などが入るので、リポジトリに入れない。

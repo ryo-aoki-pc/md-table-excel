@@ -33,7 +33,7 @@ python3 -B -m unittest discover -s tests -v
 ```
 
 - Windows では `python`。openpyxl のある Python で、リポジトリの直下で動かす
-- comrak と突き合わせるときは `MDTABLE_COMRAK_DIR` に comrak の npm パッケージのあるフォルダー（Neovim の `glfm-format` など）を、手元の文書で無編集の往復を確かめるときは `MDTABLE_CORPUS` に文書のフォルダーを設定する
+- comrak と突き合わせるときは `MDTABLE_COMRAK_DIR` に comrak の npm パッケージのあるフォルダー（Markdown の整形器 [md-format](https://github.com/ryo-aoki-pc/md-format) の導入先 `%LOCALAPPDATA%\md-format`・`~/.local/share/md-format` など）を、手元の文書で無編集の往復を確かめるときは `MDTABLE_CORPUS` に文書のフォルダーを設定する
 
 ## 書き方の規則
 

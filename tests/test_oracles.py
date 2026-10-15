@@ -1,7 +1,7 @@
 """手元の文書と comrak を使う確認（環境変数を設定したときだけ動く）。
 
 - MDTABLE_CORPUS: Markdown のあるフォルダー。すべての表を書き出して無編集で取り込み、変わらないこと
-- MDTABLE_COMRAK_DIR: comrak の npm パッケージを持つフォルダー（例: Neovim の glfm-format）。
+- MDTABLE_COMRAK_DIR: comrak の npm パッケージを持つフォルダー（例: md-format の導入先）。
   ブロックの構造（葉のブロックの種類・行・祖先、表の行）が comrak と同じこと
 """
 
