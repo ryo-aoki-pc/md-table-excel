@@ -158,6 +158,8 @@ Neovim の Markdown の整形器が、LazyVimStarter の `glfm-format`（`%LOCAL
 
 ### 環境と対象
 
+- 対象は mdtable のコミット `a7e0164`（この節を足す前の `main`）。2026-10-16 に、`main` の `b60ac1e` に載せ直した版でやり直し、
+  結果は下と同じだった（そのときの Python は scoop の Python 3.14.8 と openpyxl 3.1.5）
 - Windows 11 Pro 10.0.26300、mdtable の導入先の仮想環境の Python 3.14.8（openpyxl 入り）、Node.js 26.10.0
 - comrak 0.48.0-rc.0（md-format の導入先。確かめたときは、md-format の作業中のブランチを一時のフォルダーに導入したもの）
 - 手元の文書は、docs のサブモジュール 9 つの `*.md` 224 本と、setup-notes の `almalinux-setup.md` の 15,092 行の版（コミット `89f9712`）
