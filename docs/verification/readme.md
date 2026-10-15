@@ -141,6 +141,7 @@ python -B -m unittest discover -s tests -v
 - どちらも、clone → `setup-mdtable.py` → `--check`（`導入済み: mdtable 0.1.0`）の後に、ロールバックの手順で、起動コマンド（AlmaLinux 10 はシンボリックリンクの `~/.local/bin/mdtable`、Windows は写しの `mdtable.exe`）・仮想環境（`~/.local/share/md-table-excel`・`%LOCALAPPDATA%\md-table-excel`）・clone が消えた
 - AlmaLinux 10 では、`command -v` が何も出さず、`ls -d` が 3 つとも `No such file or directory` を出した。Windows では、`Test-Path` が手順 2 で `False` を 2 つ、手順 4 で `False` を 1 つ出した
 - 残ったのは、空の `~/.local/bin`・`~/.local/share` と、pip のキャッシュ（AlmaLinux 10 の `~/.cache/pip`）
+- レビューの指摘で、仮想環境の場所の決め方（`XDG_DATA_HOME` が絶対パスのときだけ使う）と、clone の確かめ（どのブランチにも push していないコミットと stash も見る）・確認の表示を直した後も、同じ方法で流し直し、同じ結果だった
 - Windows の手順 2 の `Get-Command` は、試したプロセスの PATH に、この PC に入っている本物の `~/.local/bin` も入っていたので、そちらの `mdtable.exe` を出した。使い捨ての場所の起動コマンドが消えたことは、`Test-Path` で確かめた
 
 ### ロールバックで未検証のこと

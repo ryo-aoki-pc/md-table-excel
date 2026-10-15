@@ -5,6 +5,7 @@
 - setup-notes の「mdtable を導入・更新する」で入れたものを消す。消すのは、起動コマンド・専用の仮想環境・clone の 3 つ
 - Python・git と、`~/.local/bin` を PATH に足した設定は、ほかのコマンドも使うので残す
 - `setup-mdtable.py` に `--install-dir`・`--bin-dir` を付けて別の場所に入れたなら、その場所に読み替える
+- 「この節の手順 N」はこの文書の手順を指す
 - macOS（未検証）は、起動コマンドが `~/.local/bin/mdtable`、仮想環境が `~/Library/Application Support/md-table-excel`
 
 ## ロールバック
@@ -18,30 +19,35 @@
 1. 起動コマンドと専用の仮想環境を消し、消えたか確かめる。
 
    ```bash
+   d="${XDG_DATA_HOME:-}"; case "$d" in /*) ;; *) d="$HOME/.local/share" ;; esac
    rm -f ~/.local/bin/mdtable
-   rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/md-table-excel"
+   rm -rf "$d/md-table-excel"
    printf '\n\033[7m 確認 \033[0m\n'
    command -v mdtable
-   ls -d ~/.local/bin/mdtable "${XDG_DATA_HOME:-$HOME/.local/share}/md-table-excel"
+   ls -d ~/.local/bin/mdtable "$d/md-table-excel"
    ```
 
    - `command -v` が何も出さず、`ls` が 2 つとも `No such file or directory` を出せばよい
+   - 仮想環境の場所は `setup-mdtable.py` と同じ決め方 (`XDG_DATA_HOME` が絶対パスのときだけ使う) にしてある
    - pip のキャッシュ（`~/.cache/pip`）は、ほかの pip も使うので残す
 
 1. clone に、手元だけの変更が無いか確かめる。
 
    ```bash
+   printf '\n\033[7m 確認 \033[0m\n'
    git -C ~/md-table-excel status --short
-   git -C ~/md-table-excel log --oneline '@{u}..'
+   git -C ~/md-table-excel log --branches --not --remotes --oneline
+   git -C ~/md-table-excel stash list
    ```
 
-   - どちらも何も出さなければ、手元だけの変更は無い（コミットしていない変更と、push していないコミットが無い）
+   - 3 つとも何も出さなければ、手元だけの変更は無い（コミットしていない変更、どのブランチにも push していないコミット、stash が無い）
    - 何か出たら、要るものを別の場所へ写してから、この節の手順 3 へ進む
 
 1. clone を消す（取り戻せない）。
 
    ```bash
    rm -rf ~/md-table-excel
+   printf '\n\033[7m 確認 \033[0m\n'
    ls -d ~/md-table-excel
    ```
 
@@ -78,11 +84,13 @@
 1. clone に、手元だけの変更が無いか確かめる。
 
    ```powershell
+   "`n$([char]27)[7m 確認 $([char]27)[0m"
    git -C "$env:USERPROFILE\md-table-excel" status --short
-   git -C "$env:USERPROFILE\md-table-excel" log --oneline '@{u}..'
+   git -C "$env:USERPROFILE\md-table-excel" log --branches --not --remotes --oneline
+   git -C "$env:USERPROFILE\md-table-excel" stash list
    ```
 
-   - どちらも何も出さなければ、手元だけの変更は無い
+   - 3 つとも何も出さなければ、手元だけの変更は無い
    - 何か出たら、要るものを別の場所へ写してから、この節の手順 4 へ進む
 
 1. clone を消す（取り戻せない）。

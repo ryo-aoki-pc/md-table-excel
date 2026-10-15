@@ -13,7 +13,7 @@ GLFM（GitLab Flavored Markdown）の文書にある表を Excel で編集して
 | 導入・更新 | [mdtable を導入・更新する](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/almalinux-setup.md#mdtable-を導入更新する) | [mdtable を導入・更新する](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/windows-setup.md#mdtable-を導入更新する) |
 | 使い方 | [mdtable で Markdown の表を Excel と往復する](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/almalinux-setup.md#mdtable-で-markdown-の表を-excel-と往復する) | [mdtable で Markdown の表を Excel と往復する](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/windows-setup.md#mdtable-で-markdown-の表を-excel-と往復する) |
 | Excel で編集するときの注意 | [mdtable のブックを Excel で編集するときの注意](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/almalinux-setup.md#mdtable-のブックを-excel-で編集するときの注意) | [mdtable のブックを Excel で編集するときの注意](https://github.com/ryo-aoki-pc/setup-notes/blob/main/docs/windows-setup.md#mdtable-のブックを-excel-で編集するときの注意) |
-| 戻す | [mdtable のロールバック](docs/extra/readme.md#ロールバック) | [Windows 11 のロールバック](docs/extra/readme.md#windows-11-のロールバック) |
+| 戻す | [ロールバック](docs/extra/readme.md#ロールバック) | [Windows 11 のロールバック](docs/extra/readme.md#windows-11-のロールバック) |
 
 - macOS（未検証）: clone したフォルダーで `python3 scripts/setup-mdtable.py` を実行する。起動コマンドは `~/.local/bin/mdtable`
 
