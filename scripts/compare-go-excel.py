@@ -25,6 +25,10 @@ TIMEOUT = 300
 EDITS = ["none", "text", "insert-row", "align", "number", "number-force", "date-force", "merge", "delete-col",
          "header", "rich", "rename-sheet", "add-sheet", "outside", "formula", "strict"]
 
+# 1 つの Excel で 300 冊ほどを開け閉めすると、終了するときに Excel が異常終了し、Windows が /restore で
+# 起動し直す（Python 版のブックだけでも起きた）。そのため、BATCH 冊ごとに Excel を起動し直す
+BATCH = 100
+
 PS_SCRIPT = r"""
 param([Parameter(Mandatory)][string]$Tasks)
 $ErrorActionPreference = 'Stop'
@@ -194,16 +198,18 @@ def main():
                 tasks.append({"book": target, "sheet": sheet, "row": row, "col": col, "cols": cols, "edit": edit})
                 cases.append((name, source, edit, folder, target))
 
-    task_file = os.path.join(out, "tasks.json")
-    with open(task_file, "w", encoding="utf-8") as handle:
-        json.dump(tasks, handle, ensure_ascii=False)
     ps_file = os.path.join(out, "excel-edit.ps1")
     with open(ps_file, "w", encoding="utf-8-sig", newline="\r\n") as handle:
         handle.write(PS_SCRIPT)
     print("Excel で %d 冊を保存する" % len(tasks))
-    proc = subprocess.run(["pwsh", "-NoProfile", "-File", ps_file, "-Tasks", task_file],
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3600)
-    log = proc.stdout.decode("utf-8", "replace")
+    log = ""
+    for start in range(0, len(tasks), BATCH):
+        task_file = os.path.join(out, "tasks-%04d.json" % start)
+        with open(task_file, "w", encoding="utf-8") as handle:
+            json.dump(tasks[start:start + BATCH], handle, ensure_ascii=False)
+        proc = subprocess.run(["pwsh", "-NoProfile", "-File", ps_file, "-Tasks", task_file],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=3600)
+        log += proc.stdout.decode("utf-8", "replace")
     with open(os.path.join(out, "excel.log"), "w", encoding="utf-8") as handle:
         handle.write(log)
     failed = [line for line in log.splitlines() if line.startswith("失敗")]
