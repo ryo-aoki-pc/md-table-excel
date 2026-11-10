@@ -6,6 +6,8 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -15,6 +17,7 @@ from helpers import run_cli
 import openpyxl
 
 from mdtable import cli
+from mdtable.workbook import WorkbookError
 
 DOCUMENT = """# 文書
 
@@ -211,6 +214,276 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         book = openpyxl.load_workbook(self.xlsx)
         self.assertEqual([t for t in book.sheetnames if t.startswith("表")], ["表2 文書"])
+
+    def _change_edit_workbook(self, path):
+        book = openpyxl.load_workbook(path)
+        book[book.sheetnames[1]]["A2"] = "lazygit2"
+        book.save(path)
+        book.close()
+
+    def _run_edit(self, startfile, read_input=None, options=()):
+        directory = tempfile.mkdtemp(dir=self.dir)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        if read_input is None:
+            read_input = lambda: ""
+        with mock.patch.object(cli.os, "name", "nt"), \
+                mock.patch.object(cli.os, "startfile", startfile, create=True), \
+                mock.patch.object(cli.tempfile, "mkdtemp", return_value=directory), \
+                mock.patch.object(builtins, "input", read_input), \
+                mock.patch.object(cli, "POLL_SECONDS", 0.002), \
+                mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
+                redirect_stderr(stderr), redirect_stdout(stdout):
+            code = cli.main(["edit", self.md] + list(options))
+        return code, stdout.getvalue(), stderr.getvalue(), directory
+
+    def _close_edit_in_background(self, path, proceed, delay=0):
+        ready = threading.Event()
+        errors = []
+
+        def close_book():
+            try:
+                owner = os.path.join(os.path.dirname(path), "~$" + os.path.basename(path))
+                with open(owner, "w"):
+                    pass
+                ready.set()
+                if not proceed.wait(2):
+                    raise AssertionError("ブックを閉じる前の待ち合わせが終わりませんでした")
+                time.sleep(delay)
+                self._change_edit_workbook(path)
+                os.remove(owner)
+            except BaseException as error:
+                errors.append(error)
+                ready.set()
+
+        thread = threading.Thread(target=close_book, daemon=True)
+        thread.start()
+        self.addCleanup(lambda: self.assertEqual(errors, []))
+        self.addCleanup(thread.join, 2)
+        self.assertTrue(ready.wait(2))
+
+    def test_edit_imports_when_closed_without_enter(self):
+        owner_seen, release_input = threading.Event(), threading.Event()
+        self.addCleanup(release_input.set)
+        original_owner_files = cli._owner_files
+
+        def owners(directory):
+            names = original_owner_files(directory)
+            if names:
+                owner_seen.set()
+            return names
+
+        def read_input():
+            release_input.wait(2)
+            raise KeyboardInterrupt
+
+        reader = mock.Mock(side_effect=read_input)
+        with mock.patch.object(cli, "_owner_files", side_effect=owners):
+            code, out, err, directory = self._run_edit(
+                lambda path: self._close_edit_in_background(path, owner_seen), reader)
+        release_input.set()
+        self.assertEqual(code, 0, err)
+        self.assertIn("ブックが閉じられたので取り込みます", err)
+        self.assertEqual(reader.call_count, 1)
+        self.assertFalse(os.path.exists(directory))
+        with open(self.md, encoding="utf-8") as handle:
+            self.assertIn("| lazygit2 |", handle.read())
+
+    def test_edit_enter_with_owner_then_closes_automatically(self):
+        waiting, release_input = threading.Event(), threading.Event()
+        self.addCleanup(release_input.set)
+        answers = iter(["", "n"])
+
+        def read_input():
+            try:
+                return next(answers)
+            except StopIteration:
+                waiting.set()
+                release_input.wait(2)
+                raise KeyboardInterrupt
+
+        reader = mock.Mock(side_effect=read_input)
+        code, out, err, directory = self._run_edit(
+            lambda path: self._close_edit_in_background(path, waiting), reader)
+        release_input.set()
+        self.assertEqual(code, 0, err)
+        self.assertIn("保存して閉じると自動で進みます（このまま取り込むなら y を入力して Enter）", err)
+        self.assertEqual(err.count("ブックがまだ開いているようです"), 1)
+        self.assertIn("ブックが閉じられたので取り込みます", err)
+        self.assertEqual(reader.call_count, 3)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_edit_confirms_import_while_owner_exists(self):
+        def startfile(path):
+            with open(os.path.join(os.path.dirname(path), "~$" + os.path.basename(path)), "w"):
+                pass
+            self._change_edit_workbook(path)
+
+        reader = mock.Mock(side_effect=["", " Y "])
+        code, out, err, directory = self._run_edit(startfile, reader)
+        self.assertEqual(code, 0, err)
+        self.assertIn("ブックがまだ開いているようです", err)
+        self.assertNotIn("ブックが閉じられたので取り込みます", err)
+        self.assertEqual(reader.call_count, 2)
+        self.assertFalse(os.path.exists(directory))
+        with open(self.md, encoding="utf-8") as handle:
+            self.assertIn("| lazygit2 |", handle.read())
+
+    def test_edit_eof_without_owner_keeps_workbook(self):
+        reader = mock.Mock(side_effect=EOFError)
+        code, out, err, directory = self._run_edit(
+            lambda path: None, reader, ("--keep-kind", "--strict-text"))
+        self.assertEqual(code, 1, err)
+        self.assertIn("中止しました。ブックを残しました:", err)
+        self.assertIn("取り込むときは: mdtable import", err)
+        self.assertIn('--md "%s" --keep-kind --strict-text' % self.md, err)
+        self.assertEqual(reader.call_count, 1)
+        self.assertTrue(any(name.endswith(".xlsx") for name in os.listdir(directory)))
+
+    def test_edit_eof_with_owner_waits_past_grace(self):
+        eof_seen = threading.Event()
+
+        def read_input():
+            eof_seen.set()
+            raise EOFError
+
+        reader = mock.Mock(side_effect=read_input)
+        code, out, err, directory = self._run_edit(
+            lambda path: self._close_edit_in_background(path, eof_seen, delay=0.06), reader)
+        self.assertEqual(code, 0, err)
+        self.assertIn("ブックが閉じられたので取り込みます", err)
+        self.assertNotIn("中止しました", err)
+        self.assertEqual(reader.call_count, 1)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_edit_export_failure_removes_temporary_directory(self):
+        with open(self.md, "w", encoding="utf-8", newline="") as handle:
+            handle.write("表がない文書\n")
+        startfile = mock.Mock()
+        code, out, err, directory = self._run_edit(startfile)
+        self.assertEqual(code, 1, err)
+        self.assertIn("エラー: 表がありません: " + self.md, err)
+        self.assertNotIn("ブックを残しました", err)
+        self.assertFalse(os.path.exists(directory))
+        startfile.assert_not_called()
+
+    def test_edit_startfile_failure_removes_temporary_directory(self):
+        code, out, err, directory = self._run_edit(mock.Mock(side_effect=OSError("開けません")))
+        self.assertEqual(code, 1, err)
+        self.assertIn("エラー:", err)
+        self.assertNotIn("ブックを残しました", err)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_edit_input_error_keeps_workbook_and_command(self):
+        code, out, err, directory = self._run_edit(
+            lambda path: None, mock.Mock(side_effect=OSError("入力を読めません")))
+        self.assertEqual(code, 1, err)
+        self.assertIn("ブックを残しました:", err)
+        self.assertIn("取り込むときは: mdtable import", err)
+        self.assertIn("入力を読めません", err)
+        self.assertTrue(any(name.endswith(".xlsx") for name in os.listdir(directory)))
+
+    def test_edit_waits_for_readable_book_after_owner_disappears(self):
+        with open(self.xlsx, "wb") as handle:
+            handle.write(b"book")
+        real_open = open
+        attempts = []
+
+        def open_book(*args, **kwargs):
+            attempts.append(None)
+            if len(attempts) == 1:
+                raise PermissionError("まだ閉じられていません")
+            return real_open(*args, **kwargs)
+
+        names = iter([["~$book.xlsx"], [], [], []])
+        stderr = io.StringIO()
+        with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
+                mock.patch.object(builtins, "input", side_effect=EOFError), \
+                mock.patch.object(builtins, "open", side_effect=open_book), \
+                mock.patch.object(cli, "POLL_SECONDS", 0.002), \
+                redirect_stderr(stderr):
+            cli._wait_until_closed(self.dir, self.xlsx)
+        self.assertEqual(len(attempts), 2)
+        self.assertIn("ブックが閉じられたので取り込みます", stderr.getvalue())
+
+    def test_edit_owner_appears_during_eof_grace(self):
+        with open(self.xlsx, "wb") as handle:
+            handle.write(b"book")
+        names = iter([[], [], ["~$book.xlsx"], []])
+        stderr = io.StringIO()
+        reader = mock.Mock(side_effect=EOFError)
+        with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
+                mock.patch.object(builtins, "input", reader), \
+                mock.patch.object(cli, "POLL_SECONDS", 0.002), \
+                mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
+                redirect_stderr(stderr):
+            cli._wait_until_closed(self.dir, self.xlsx)
+        self.assertIn("ブックが閉じられたので取り込みます", stderr.getvalue())
+        self.assertEqual(reader.call_count, 1)
+
+    def test_edit_missing_markdown_keeps_workbook_and_command(self):
+        code, out, err, directory = self._run_edit(
+            lambda path: os.remove(self.md), options=("--keep-kind", "--strict-text"))
+        self.assertEqual(code, 1, err)
+        xlsx = os.path.join(directory, next(name for name in os.listdir(directory) if name.endswith(".xlsx")))
+        self.assertIn("ブックを残しました: " + xlsx, err)
+        self.assertIn('取り込むときは: mdtable import "%s" --md "%s" --keep-kind --strict-text'
+                      % (xlsx, self.md), err)
+        self.assertIn("エラー: 書き戻す Markdown が見つかりません", err)
+        self.assertNotIn("Traceback", err)
+
+    def test_edit_dry_run_keeps_diff_and_workbook(self):
+        code, out, err, directory = self._run_edit(
+            self._change_edit_workbook, options=("--dry-run", "--keep-kind", "--strict-text"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("-| lazygit |", out)
+        self.assertIn("+| lazygit2 |", out)
+        self.assertIn("（--dry-run なので書き戻していません）", err)
+        self.assertIn("ブックを残しました。取り込むときは:", err)
+        xlsx = os.path.join(directory, next(name for name in os.listdir(directory) if name.endswith(".xlsx")))
+        self.assertIn('  mdtable import "%s" --md "%s" --keep-kind --strict-text' % (xlsx, self.md), err)
+        with open(self.md, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), DOCUMENT)
+
+    def test_edit_dry_run_without_content_changes_removes_workbook(self):
+        def startfile(path):
+            book = openpyxl.load_workbook(path)
+            book[book.sheetnames[1]].column_dimensions["A"].width = 42
+            book.save(path)
+            book.close()
+
+        code, out, err, directory = self._run_edit(startfile, options=("--dry-run",))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "")
+        self.assertIn("Markdown は変わりません", err)
+        self.assertNotIn("ブックを残しました", err)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_edit_retries_unreadable_workbook_once(self):
+        original_import = cli.import_workbook
+        attempts = []
+
+        def import_workbook(*args, **kwargs):
+            attempts.append(None)
+            if len(attempts) == 1:
+                raise WorkbookError("ブックを読み込めません")
+            return original_import(*args, **kwargs)
+
+        with mock.patch.object(cli, "import_workbook", side_effect=import_workbook), \
+                mock.patch.object(cli.time, "sleep"):
+            code, out, err, directory = self._run_edit(self._change_edit_workbook)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_edit_repeated_workbook_error_keeps_workbook(self):
+        with mock.patch.object(cli, "import_workbook", side_effect=WorkbookError("ブックを読み込めません")), \
+                mock.patch.object(cli.time, "sleep"):
+            code, out, err, directory = self._run_edit(self._change_edit_workbook)
+        self.assertEqual(code, 1, err)
+        self.assertIn("ブックを残しました:", err)
+        self.assertIn("取り込むときは: mdtable import", err)
+        self.assertIn("エラー: ブックを読み込めません", err)
+        self.assertTrue(os.path.exists(directory))
 
     def test_edit_flow(self):
         # edit: Excel で開く代わりにブックを書き換え、Enter の代わりに空の入力を返す
