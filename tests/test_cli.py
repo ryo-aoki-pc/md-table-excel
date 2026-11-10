@@ -230,7 +230,7 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", startfile, create=True), \
                 mock.patch.object(cli.tempfile, "mkdtemp", return_value=directory), \
-                mock.patch.object(builtins, "input", read_input), \
+                mock.patch.object(cli, "_read_line", read_input), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
                 mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
                 redirect_stderr(stderr), redirect_stdout(stdout):
@@ -398,7 +398,7 @@ class CliTest(unittest.TestCase):
         names = iter([["~$book.xlsx"], [], [], []])
         stderr = io.StringIO()
         with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
-                mock.patch.object(builtins, "input", side_effect=EOFError), \
+                mock.patch.object(cli, "_read_line", side_effect=EOFError), \
                 mock.patch.object(builtins, "open", side_effect=open_book), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
                 redirect_stderr(stderr):
@@ -413,7 +413,7 @@ class CliTest(unittest.TestCase):
         stderr = io.StringIO()
         reader = mock.Mock(side_effect=EOFError)
         with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
-                mock.patch.object(builtins, "input", reader), \
+                mock.patch.object(cli, "_read_line", reader), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
                 mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
                 redirect_stderr(stderr):
@@ -498,7 +498,7 @@ class CliTest(unittest.TestCase):
         stderr = io.StringIO()
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", fake_startfile, create=True), \
-                mock.patch.object(builtins, "input", lambda *a: ""), \
+                mock.patch.object(cli, "_read_line", lambda *a: ""), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 0, stderr.getvalue())
@@ -523,7 +523,7 @@ class CliTest(unittest.TestCase):
                 with mock.patch.object(cli.os, "name", "nt"), \
                         mock.patch.object(cli.os, "startfile", fake_startfile, create=True), \
                         mock.patch.object(cli.tempfile, "mkdtemp", return_value=directory), \
-                        mock.patch.object(builtins, "input", lambda *a: ""), \
+                        mock.patch.object(cli, "_read_line", lambda *a: ""), \
                         redirect_stderr(stderr), redirect_stdout(io.StringIO()):
                     code = cli.main(["edit", self.md, option])
                 self.assertEqual(code, 1, stderr.getvalue())
@@ -538,7 +538,7 @@ class CliTest(unittest.TestCase):
         stderr = io.StringIO()
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", lambda path: None, create=True), \
-                mock.patch.object(builtins, "input", lambda *a: ""), \
+                mock.patch.object(cli, "_read_line", lambda *a: ""), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 0)
@@ -551,7 +551,7 @@ class CliTest(unittest.TestCase):
         stderr = io.StringIO()
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", lambda path: None, create=True), \
-                mock.patch.object(builtins, "input", interrupt), \
+                mock.patch.object(cli, "_read_line", interrupt), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 1)
@@ -612,6 +612,36 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("Traceback", err)
         with open(self.md, encoding="utf-8") as handle:
             self.assertIn("| lazygit2 |", handle.read())
+
+    def test_read_line_from_terminal_uses_input(self):
+        terminal = mock.Mock()
+        terminal.isatty.return_value = True
+        with mock.patch.object(cli.sys, "stdin", terminal), \
+                mock.patch.object(builtins, "input", return_value="y") as reader:
+            self.assertEqual(cli._read_line(), "y")
+        reader.assert_called_once_with()
+
+    def test_read_line_from_pipe_reads_the_descriptor(self):
+        # 端末でない標準入力は、ファイル記述子から 1 行ずつ読む（改行と CR を除く）
+        read_end, write_end = os.pipe()
+        stream = os.fdopen(read_end, "r", encoding="utf-8")
+        try:
+            os.write(write_end, "あ y\r\n次の行\n終わり".encode("utf-8"))
+            os.close(write_end)
+            with mock.patch.object(cli.sys, "stdin", stream), \
+                    mock.patch.object(builtins, "input", side_effect=AssertionError("input を使った")):
+                self.assertEqual(cli._read_line(), "あ y")
+                self.assertEqual(cli._read_line(), "次の行")
+                self.assertEqual(cli._read_line(), "終わり")
+                with self.assertRaises(EOFError):
+                    cli._read_line()
+        finally:
+            stream.close()
+
+    def test_read_line_without_stdin(self):
+        with mock.patch.object(cli.sys, "stdin", None):
+            with self.assertRaises(EOFError):
+                cli._read_line()
 
     def test_os_error_message(self):
         # ファイル名の無い OSError でも、先頭に「: 」だけが付かない

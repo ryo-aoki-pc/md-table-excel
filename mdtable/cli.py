@@ -98,11 +98,40 @@ def _owner_files(directory):
     return [name for name in os.listdir(directory) if name.startswith("~$") or name.startswith(".~lock.")]
 
 
+def _read_line():
+    """標準入力の 1 行（改行は除く）。閉じていれば EOFError。
+
+    端末でない標準入力（パイプなど）は、ファイル記述子から直接読む。input() は標準入力のバッファのロックを
+    持ったまま待つので、読み待ちのスレッドを残して終わると、Python 3.9 は終了時に異常終了する
+    （could not acquire lock for <stdin> at interpreter shutdown）。端末の input() はそのロックを使わない。
+    """
+    stream = sys.stdin
+    if stream is None:
+        raise EOFError
+    try:
+        descriptor = None if stream.isatty() else stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        descriptor = None       # 差し替えられた標準入力は input() に任せる
+    if descriptor is None:
+        return input()
+    data = bytearray()
+    while True:
+        chunk = os.read(descriptor, 1)
+        if not chunk:
+            if data:
+                break
+            raise EOFError
+        if chunk == b"\n":
+            break
+        data.extend(chunk)
+    return data.decode("utf-8", "replace").rstrip("\r")
+
+
 def _wait_until_closed(directory, xlsx):
     """入力を待ちながら、開かれたブックが閉じられたかを確かめる。"""
     requests = queue.Queue()
     results = queue.Queue()
-    read_line = input
+    read_line = _read_line
 
     def read_input():
         # 頼まれた 1 行だけ読む。自動で進んだ後に次の入力を読み始めないようにする
