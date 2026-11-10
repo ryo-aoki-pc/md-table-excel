@@ -62,6 +62,28 @@ class TableSelectionTest(unittest.TestCase):
         self.assertEqual(str(raised.exception),
                          "直前の見出しが「導入」の表がありません（--table は番号・L行番号・直前の見出しの文字）")
 
+    def test_numeric_and_line_like_headings(self):
+        # 見出しが「2026」や「L12」のとき、その番号・行番号の表が無ければ、見出しの文字として選ぶ
+        table = "| a |\n|---|\n| b |\n\n"
+        found = regions("# 2026\n\n" + table + "# L99\n\n" + table + "# 2\n\n" + table)
+        self.assertEqual([r.number for r in select_tables(found, ["2026"])], [1])
+        self.assertEqual([r.number for r in select_tables(found, ["L99"])], [2])
+        # 番号や行番号に当たる表があれば、そちらを選ぶ（見出し「2」の表 3 ではなく、表 2）
+        self.assertEqual([r.number for r in select_tables(found, ["2"])], [2])
+        self.assertEqual([r.number for r in select_tables(found, ["L3"])], [1])
+        with self.assertRaises(MarkdownError) as raised:
+            select_tables(found, ["9"])
+        self.assertEqual(str(raised.exception), "表 9 はありません（表は 3 個）")
+        with self.assertRaises(MarkdownError) as raised:
+            select_tables(found, ["L500"])
+        self.assertEqual(str(raised.exception), "500 行目を含む表がありません")
+
+    def test_heading_selects_excluded_table_too(self):
+        # 対象外の表も、見出しで選べる（書き出すときに、対象外の理由が出る）
+        found = regions("# 崩れた表\n\n<table>\n<tr><td>a\n\n    </td></tr>\n</table>\n")
+        self.assertIsNotNone(found[0].excluded)
+        self.assertEqual(select_tables(found, ["崩れた表"]), [found[0]])
+
     def test_heading_line_without_heading_and_setext_heading(self):
         found = regions("| a |\n|---|\n\n題\n===\n\n| b |\n|---|\n")
         self.assertEqual([(r.heading, r.heading_line) for r in found], [("", None), ("題", 3)])

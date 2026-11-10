@@ -181,7 +181,7 @@ def import_workbook(xlsx_path, md_path=None, dry_run=False, force=False, keep_ki
             by_hash.setdefault(region.source_hash(), []).append(region)
 
     # ブックの表の元の本文。同じ番号の今の表がこのどれかなら、文書の中で表を入れ替えたとみる
-    known_hashes = set(table.source_hash for table in data.tables)
+    known_hashes = data.source_hashes
     replacements = []
     for table in data.tables:
         label = "表 %d" % table.number

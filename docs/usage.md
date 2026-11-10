@@ -78,11 +78,17 @@
 <details id="mdtable-で-markdown-の表を-excel-と往復する-の補足と注意点">
   <summary>mdtable で Markdown の表を Excel と往復する の補足と注意点</summary>
 
+**[mdtable で Markdown の表を Excel と往復する](#mdtable-で-markdown-の表を-excel-と往復する)の手順 1**
+
+- `mdtable list README.md` は、表の番号・行・種類・大きさ・場所・直前の見出しを出す。`--json` を付けると、一覧を JSON で出す。見出しの行番号と対象外の理由も含む
+- `export` に `--table 3` を付けると 3 番目の表、`--table L120` は 120 行目を含む表、`--table "導入"` は直前の見出しが「導入」の表をすべて書き出す。複数指定できる
+- 表を 1 つだけ書き出すと、ブックはその表のシートで開く
+
 **[mdtable で Markdown の表を Excel と往復する](#mdtable-で-markdown-の表を-excel-と往復する)の手順 2**
 
 - `--dry-run` は差分と変えたセルの一覧を出す。セルは表ごとに 20 件まで、文字は 30 字まで出し、改行を `⏎` で表す
 - 端末では差分に色を付ける。パイプ・ファイルへの出力、空でない環境変数 `NO_COLOR` があるときは色を付けない
-- `list` に `--json` を付けると、表の番号・行範囲・種類・大きさ・対象外の理由・場所・直前の見出しを JSON で出す
+- `import --table 3` は、ブックに記録した番号が 3 の表だけの差分を出す。複数指定できる
 
 **[mdtable で Markdown の表を Excel と往復する](#mdtable-で-markdown-の表を-excel-と往復する)の手順 3**
 

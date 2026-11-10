@@ -221,20 +221,22 @@ def select_tables(regions, selectors):
     chosen = []
     for selector in selectors:
         text = selector.strip()
+        found = []
+        missing = None
         if re.match(r"^[Ll]\d+$", text):
             line = int(text[1:]) - 1
             found = [r for r in regions if r.start <= line <= r.end]
-            if not found:
-                raise MarkdownError("%d 行目を含む表がありません" % (line + 1))
+            missing = "%d 行目を含む表がありません" % (line + 1)
         elif re.match(r"^\d+$", text):
             number = int(text)
             found = [r for r in regions if r.number == number]
-            if not found:
-                raise MarkdownError("表 %d はありません（表は %d 個）" % (number, len(regions)))
-        else:
+            missing = "表 %d はありません（表は %d 個）" % (number, len(regions))
+        if not found:
+            # 番号・行番号に当たる表が無ければ、見出しが「2026」や「L12」のこともあるので、見出しの文字として探す
             found = [r for r in regions if r.heading_line is not None and r.heading.strip() == text]
             if not found:
-                raise MarkdownError("直前の見出しが「%s」の表がありません（--table は番号・L行番号・直前の見出しの文字）" % text)
+                raise MarkdownError(
+                    missing or "直前の見出しが「%s」の表がありません（--table は番号・L行番号・直前の見出しの文字）" % text)
             heading_lines = sorted({r.heading_line for r in found})
             if len(heading_lines) > 1:
                 lines = "・".join("%d 行目" % (line + 1) for line in heading_lines)

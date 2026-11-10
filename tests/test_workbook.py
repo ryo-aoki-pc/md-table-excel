@@ -237,6 +237,32 @@ class ExportImportTest(unittest.TestCase):
         self.assertEqual(report.warnings, [])
         self.assertEqual(read(self.md), original.replace("| a |", "| aa |"))
 
+    def test_selected_import_still_reports_unrelated_sheets(self):
+        # 表を絞って取り込むときも、足したシートの警告は出し、選んでいない表のシートは警告しない
+        original = "| h |\n|---|\n| a |\n\n| h2 |\n|---|\n| b |\n"
+        write(self.md, original)
+        self.export()
+        book = openpyxl.load_workbook(self.xlsx)
+        book[self.sheet(1)]["A2"] = "aa"
+        book.create_sheet("メモ")
+        book.save(self.xlsx)
+        data = workbook.read(self.xlsx, tables=[1])
+        self.assertEqual([table.number for table in data.tables], [1])
+        self.assertEqual(len(data.source_hashes), 2)
+        self.assertEqual(data.warnings, ["シート「メモ」はどの表とも対応しないので読まない"])
+
+    def test_selected_import_of_swapped_tables(self):
+        # 表を絞って取り込むときも、文書の中で表を入れ替えたことを、ブックの全部の表の元の本文で見分ける
+        first = "| a |\n|---|\n| 1 |\n"
+        second = "| b |\n|---|\n| 2 |\n"
+        write(self.md, first + "\n" + second)
+        self.export()
+        edit_sheet(self.xlsx, self.sheet(1), {"A1": "b", "A2": "2"})
+        write(self.md, second + "\n" + first)
+        report = sync.import_workbook(self.xlsx, tables=[1])
+        self.assertEqual(report.errors, [])
+        self.assertEqual(read(self.md), second + "\n" + second)
+
     def test_import_missing_number_lists_exported_numbers(self):
         original = "| h |\n|---|\n| a |\n\n| h2 |\n|---|\n| b |\n\n| h3 |\n|---|\n| c |\n"
         write(self.md, original)

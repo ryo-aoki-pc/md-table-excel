@@ -34,6 +34,56 @@ class ChangesTest(unittest.TestCase):
         self.assertEqual(changes.summary(), "（1 行を追加）")
         self.assertEqual(changes.cells, [])
 
+    def test_rows_and_columns_changed_together(self):
+        # 行と列を同時に足しても・消しても、元のセルを「変更」と数えない
+        cases = [
+            ("途中に 1 列、末尾に 1 行", [["a", "b"], ["c", "d"]],
+             [["a", "x", "b"], ["c", "y", "d"], ["e", "z", "f"]], "（1 行を追加、1 列を追加）"),
+            ("先頭に 1 列、先頭に 1 行", [["a", "b"], ["c", "d"]],
+             [["p", "q", "r"], ["s", "a", "b"], ["t", "c", "d"]], "（1 行を追加、1 列を追加）"),
+            ("1 行と 1 列を消す", [["h", "k", "m"], ["1", "2", "3"], ["4", "5", "6"]],
+             [["h", "m"], ["4", "6"]], "（1 行を削除、1 列を削除）"),
+        ]
+        for name, old, new, summary in cases:
+            with self.subTest(name=name):
+                changes = compare_models(model(old), model(new))
+                self.assertEqual(changes.summary(), summary)
+                self.assertEqual(changes.cells, [])
+
+    def test_added_column_next_to_edited_column(self):
+        # 列を足すのと同時に隣の列の文字を変えても、足した列と変えた列を取り違えない
+        old = model([["h1", "h2"], ["a", "b"], ["c", "d"]])
+        new = model([["h1", "new", "h2"], ["a", "x", "B"], ["c", "y", "d"]])
+        changes = compare_models(old, new)
+        self.assertEqual(changes.summary(), "（セル 1 個を変更、1 列を追加）")
+        self.assertEqual(changes.details(), ["  C2: 「b」→「B」"])
+
+    def test_repeated_rows_and_empty_table(self):
+        old = model([["x"], ["same"], ["same"], ["y"]])
+        new = model([["x"], ["same"], ["new"], ["same"], ["y"]])
+        self.assertEqual(compare_models(old, new).summary(), "（1 行を追加）")
+        empty = TableModel("html", 0, 0, [])
+        self.assertEqual(compare_models(empty, model([["a"]])).summary(), "（1 行を追加、1 列を追加）")
+        self.assertEqual(compare_models(model([["a"]]), empty).summary(), "（1 行を削除、1 列を削除）")
+        self.assertEqual(compare_models(empty, empty).summary(), "")
+
+    def test_large_table_with_merges_is_fast(self):
+        # 結合のある大きな表でも、結合で隠れる位置を毎回探し直さない
+        import time
+
+        def big(rows, changed):
+            cells = []
+            for row in range(rows):
+                cells.append(Cell(row, 0, "項目 %d" % row if row != changed else "変えた"))
+                if row % 2 == 0:
+                    cells.append(Cell(row, 1, "結合 %d" % row, rowspan=2))
+            return TableModel("html", rows, 2, cells)
+
+        started = time.perf_counter()
+        changes = compare_models(big(2000, -1), big(2000, 1000))
+        self.assertEqual(changes.summary(), "（セル 1 個を変更）")
+        self.assertLess(time.perf_counter() - started, 5)
+
     def test_delete_middle_row(self):
         old = model([["a"], ["b"], ["c"]])
         new = model([["a"], ["c"]])
