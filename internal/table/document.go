@@ -2,6 +2,7 @@
 package table
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/blocks"
@@ -432,6 +433,14 @@ func ApplyReplacements(m *MarkdownFile, replacements []*Replacement) string {
 
 // document.write_text_atomic に対応する同じフォルダー内での原子的な書き込み。
 func WriteTextAtomic(path, text string, bom bool) error {
+	return WriteTextAtomicContext(context.Background(), path, text, bom)
+}
+
+// WriteTextAtomicContext は取り消された書き込みの一時ファイルを閉じて削除する。
+func WriteTextAtomicContext(ctx context.Context, path, text string, bom bool) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
 	target, e := filepath.Abs(path)
 	if e != nil {
 		return e
@@ -449,6 +458,7 @@ func WriteTextAtomic(path, text string, bom bool) error {
 	}
 	temp := f.Name()
 	defer os.Remove(temp)
+	defer f.Close()
 	_, e = f.Write(data)
 	ce := f.Close()
 	if e != nil {
@@ -460,20 +470,35 @@ func WriteTextAtomic(path, text string, bom bool) error {
 	if st, e := os.Stat(target); e == nil {
 		_ = os.Chmod(temp, st.Mode().Perm())
 	}
-	return ReplaceWithRetry(temp, target, 5)
+	return ReplaceWithRetryContext(ctx, temp, target, 5)
 }
 
 // document.replace_with_retry に対応する置換の再試行。
 func ReplaceWithRetry(source, target string, retries int) error {
+	return ReplaceWithRetryContext(context.Background(), source, target, retries)
+}
+
+// ReplaceWithRetryContext は置換の直前と再試行の待ち時間に取り消しを受け付ける。
+func ReplaceWithRetryContext(ctx context.Context, source, target string, retries int) error {
 	for i := 0; i < retries; i++ {
+		if e := ctx.Err(); e != nil {
+			return e
+		}
 		e := os.Rename(source, target)
 		if e == nil {
 			return nil
 		}
-		if !errors.Is(e, os.ErrPermission) || i == retries-1 {
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
+		if !IsPermissionError(e) || i == retries-1 {
 			return e
 		}
-		time.Sleep(time.Duration(i+1) * 200 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(i+1) * 200 * time.Millisecond):
+		}
 	}
 	return nil
 }

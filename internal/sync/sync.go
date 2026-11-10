@@ -1,7 +1,8 @@
-// Package sync は表の一覧と種類の変換、結果の再解析を行う。
+// Package sync は表の一覧・種類の変換・Excel との受け渡しと、結果の再解析を行う。
 package sync
 
 import (
+	"context"
 	"fmt"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/blocks"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/cellsyntax"
@@ -26,11 +27,22 @@ type Report struct {
 
 // sync.list_tables に対応する一覧。
 func ListTables(path string) ([]*table.Region, error) {
+	return ListTablesContext(context.Background(), path)
+}
+
+func ListTablesContext(ctx context.Context, path string) ([]*table.Region, error) {
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
 	md, e := table.Load(path)
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
 	if e != nil {
 		return nil, e
 	}
-	return table.FindTables(md), nil
+	regions := table.FindTables(md)
+	return regions, ctx.Err()
 }
 
 // sync._range_text に対応する範囲の表示。
@@ -106,6 +118,13 @@ func checkConversionCells(region *table.Region, target string) error {
 
 // sync.convert に対応する表の種類の変換。
 func Convert(path string, selectors []string, target string, dryRun bool) (*Report, error) {
+	return ConvertContext(context.Background(), path, selectors, target, dryRun)
+}
+
+func ConvertContext(ctx context.Context, path string, selectors []string, target string, dryRun bool) (*Report, error) {
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
 	if len(selectors) == 0 {
 		return nil, fmt.Errorf("変える表を --table で指定してください")
 	}
@@ -114,11 +133,17 @@ func Convert(path string, selectors []string, target string, dryRun bool) (*Repo
 	}
 	report := &Report{}
 	md, e := table.Load(path)
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
 	if e != nil {
 		return nil, e
 	}
 	report.Output, _ = filepath.Abs(path)
 	regions := table.FindTables(md)
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
 	chosen, e := table.SelectTables(regions, selectors)
 	if e != nil {
 		return nil, e
@@ -129,6 +154,9 @@ func Convert(path string, selectors []string, target string, dryRun bool) (*Repo
 		kindName = "HTML"
 	}
 	for _, r := range chosen {
+		if e := ctx.Err(); e != nil {
+			return nil, e
+		}
 		label := fmt.Sprintf("表 %d", r.Number)
 		if r.Excluded != "" {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: 対象外なので変えられない（%s）", label, r.Excluded))
@@ -179,11 +207,11 @@ func Convert(path string, selectors []string, target string, dryRun bool) (*Repo
 	report.Diff = pycompat.UnifiedDiff(pycompat.SplitLines(md.Text(), true), pycompat.SplitLines(newText, true), path, path)
 	report.Changed = true
 	if !dryRun {
-		if e := table.WriteTextAtomic(path, newText, md.BOM); e != nil {
+		if e := table.WriteTextAtomicContext(ctx, path, newText, md.BOM); e != nil {
 			return nil, e
 		}
 	}
-	return report, nil
+	return report, ctx.Err()
 }
 
 type lineRange struct{ start, end int }
@@ -216,7 +244,7 @@ func leafSignature(d *blocks.Document, skip []lineRange, shift func(int) int) []
 	return result
 }
 
-// sync.verify に対応する convert 後の表と前後の検証。
+// sync.verify に対応する書き戻した表と前後の検証。
 func Verify(md *table.MarkdownFile, newText string, replacements []*table.Replacement) []string {
 	var problems []string
 	newMD := table.NewMarkdown(md.Path, newText, md.BOM)
@@ -296,6 +324,27 @@ func Verify(md *table.MarkdownFile, newText string, replacements []*table.Replac
 				problems = append(problems, fmt.Sprintf("表 %d: 種類を変えると、表の中身が変わる%s", r.Number, suffix))
 			}
 			continue
+		}
+		if r.Kind == "html" && again.Kind == "html" && repl.Model != nil {
+			got, wanted := cloneModel(again.Model(), ""), cloneModel(repl.Model, "")
+			for _, m := range []*model.TableModel{got, wanted} {
+				for _, c := range m.Cells {
+					c.Text = ""
+				}
+			}
+			if !got.SameContent(wanted) {
+				problems = append(problems, fmt.Sprintf("表 %d: 書き戻した表の形・見出し・配置が、ブックの内容と違う", r.Number))
+				continue
+			}
+		}
+		m := normalizedSheetModel(again.Model(), r)
+		lines, _, e := render(r, m, &[]string{}, false)
+		if e != nil {
+			problems = append(problems, fmt.Sprintf("表 %d: 書き戻した表をもう一度書き戻せない（%s）", r.Number, e))
+			continue
+		}
+		if strings.Join(lines, "\n") != strings.Join(repl.Lines, "\n") {
+			problems = append(problems, fmt.Sprintf("表 %d: 書き戻した結果が安定しない", r.Number))
 		}
 	}
 	return problems

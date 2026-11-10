@@ -1,13 +1,16 @@
-// Package cli は list と convert のコマンドを提供する。
+// Package cli は表の一覧・変換と Excel ブックの編集用コマンドを提供する。
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/pycompat"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/sync"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/table"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -86,12 +89,14 @@ func printReport(r *sync.Report) {
 }
 
 type args struct {
-	command, markdown, target string
-	selectors                 []string
-	json, dryRun              bool
+	command, markdown, target   string
+	output, md                  string
+	selectors                   []string
+	json, dryRun                bool
+	force, keepKind, strictText bool
 }
 
-// cli.build_parser に対応する今回の試作の引数解析。
+// cli.build_parser に対応するコマンドの引数解析。
 func parse(argv []string) (args, error) {
 	a := args{}
 	if len(argv) == 0 {
@@ -109,22 +114,38 @@ func parse(argv []string) (args, error) {
 			switch {
 			case s == "--json" && a.command == "list":
 				a.json = true
-			case s == "--dry-run" && a.command == "convert":
+			case s == "--dry-run" && (a.command == "convert" || a.command == "import" || a.command == "edit"):
 				a.dryRun = true
-			case (s == "--table" || s == "--to") && a.command == "convert":
+			case s == "--force" && (a.command == "export" || a.command == "import"):
+				a.force = true
+			case s == "--keep-kind" && (a.command == "import" || a.command == "edit"):
+				a.keepKind = true
+			case s == "--strict-text" && (a.command == "import" || a.command == "edit"):
+				a.strictText = true
+			case (s == "--table" && a.command != "list") || (s == "--to" && a.command == "convert") || ((s == "-o" || s == "--output") && a.command == "export") || (s == "--md" && a.command == "import"):
 				if i+1 >= len(argv) {
 					return a, fmt.Errorf("%s に値を指定してください", s)
 				}
 				i++
 				if s == "--table" {
 					a.selectors = append(a.selectors, argv[i])
-				} else {
+				} else if s == "--to" {
 					a.target = argv[i]
+				} else if s == "--md" {
+					a.md = argv[i]
+				} else {
+					a.output = argv[i]
 				}
-			case strings.HasPrefix(s, "--table=") && a.command == "convert":
+			case strings.HasPrefix(s, "--table=") && a.command != "list":
 				a.selectors = append(a.selectors, strings.TrimPrefix(s, "--table="))
 			case strings.HasPrefix(s, "--to=") && a.command == "convert":
 				a.target = strings.TrimPrefix(s, "--to=")
+			case strings.HasPrefix(s, "--output=") && a.command == "export":
+				a.output = strings.TrimPrefix(s, "--output=")
+			case strings.HasPrefix(s, "-o") && !strings.HasPrefix(s, "--") && a.command == "export":
+				a.output = strings.TrimPrefix(s, "-o")
+			case strings.HasPrefix(s, "--md=") && a.command == "import":
+				a.md = strings.TrimPrefix(s, "--md=")
 			default:
 				return a, fmt.Errorf("引数が正しくありません: %s", s)
 			}
@@ -134,7 +155,7 @@ func parse(argv []string) (args, error) {
 			return a, fmt.Errorf("引数が多すぎます: %s", s)
 		}
 	}
-	if a.command != "list" && a.command != "convert" {
+	if a.command != "list" && a.command != "convert" && a.command != "export" && a.command != "import" && a.command != "edit" {
 		return a, fmt.Errorf("コマンドが正しくありません: %s", a.command)
 	}
 	if a.markdown == "" {
@@ -143,12 +164,18 @@ func parse(argv []string) (args, error) {
 	if a.command == "convert" && (len(a.selectors) == 0 || (a.target != "html" && a.target != "pipe")) {
 		return a, fmt.Errorf("convert には --table と --to html|pipe を指定してください")
 	}
+	if a.strictText && a.force {
+		return a, fmt.Errorf("usage: mdtable [-h] [--version] コマンド ...\nmdtable: error: --strict-text と --force は同時に指定できません")
+	}
 	return a, nil
 }
 
 // cli.cmd_list に対応する一覧の出力。
-func cmdList(a args) error {
-	regions, e := sync.ListTables(a.markdown)
+func cmdList(ctx context.Context, a args) error {
+	regions, e := sync.ListTablesContext(ctx, a.markdown)
+	if canceled := ctx.Err(); canceled != nil {
+		return canceled
+	}
 	if e != nil {
 		return e
 	}
@@ -215,8 +242,11 @@ func cmdList(a args) error {
 }
 
 // cli.cmd_convert に対応する変換結果の出力。
-func cmdConvert(a args) (int, error) {
-	r, e := sync.Convert(a.markdown, a.selectors, a.target, a.dryRun)
+func cmdConvert(ctx context.Context, a args) (int, error) {
+	r, e := sync.ConvertContext(ctx, a.markdown, a.selectors, a.target, a.dryRun)
+	if canceled := ctx.Err(); canceled != nil {
+		return 1, canceled
+	}
 	if e != nil {
 		return 1, e
 	}
@@ -237,8 +267,15 @@ func cmdConvert(a args) (int, error) {
 	return 0, nil
 }
 
+// Main は Ctrl+C の受け口を一つにまとめ、処理の後始末が終わってから戻る。
+func Main(argv []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return mainContext(ctx, argv, openWorkbook)
+}
+
 // cli.main に対応する終了コードと例外処理。
-func Main(argv []string) (code int) {
+func mainContext(ctx context.Context, argv []string, open func(string) error) (code int) {
 	defer func() {
 		if r := recover(); r != nil {
 			code = 1
@@ -250,29 +287,52 @@ func Main(argv []string) (code int) {
 			}
 		}
 	}()
+	if errors.Is(ctx.Err(), context.Canceled) {
+		errLine("中止しました")
+		return 1
+	}
 	if len(argv) == 1 && argv[0] == "--version" {
 		fmt.Fprintln(stdout, "mdtable 0.5.2")
 		return 0
 	}
 	for _, s := range argv {
 		if s == "-h" || s == "--help" {
-			fmt.Fprintln(stdout, "使い方: mdtable list [--json] <Markdown> | mdtable convert <Markdown> --table <番号|L行|見出し> --to html|pipe [--dry-run]")
+			help := commandHelp[argv[0]]
+			if help == "" {
+				help = commandHelp[""]
+			}
+			fmt.Fprint(stdout, help)
 			return 0
 		}
-	}
-	if len(argv) > 0 && (argv[0] == "export" || argv[0] == "import" || argv[0] == "edit") {
-		errLine("エラー: この試作では使えません")
-		return 1
 	}
 	a, e := parse(argv)
 	if e != nil {
 		errLine(e.Error())
 		return 2
 	}
-	if a.command == "list" {
-		e = cmdList(a)
-	} else {
-		code, e = cmdConvert(a)
+	switch a.command {
+	case "list":
+		e = cmdList(ctx, a)
+	case "convert":
+		code, e = cmdConvert(ctx, a)
+	case "export":
+		var r *sync.Report
+		r, e = sync.ExportContext(ctx, a.markdown, a.output, a.selectors, a.force)
+		if canceled := ctx.Err(); canceled != nil {
+			e = canceled
+		}
+		if e == nil {
+			printReport(r)
+			fmt.Fprintln(stdout, r.Output)
+		}
+	case "import":
+		code, e = cmdImport(ctx, a)
+	case "edit":
+		code, e = cmdEdit(ctx, a, open)
+	}
+	if errors.Is(e, context.Canceled) || (a.command != "edit" || e != nil) && errors.Is(ctx.Err(), context.Canceled) {
+		errLine("中止しました")
+		return 1
 	}
 	if e != nil {
 		message := e.Error()
