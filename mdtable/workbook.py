@@ -707,7 +707,7 @@ def _read_meta(ws, data):
         data.tables.append(table)
 
 
-def read(path, force=False, strict=False):
+def read(path, force=False, strict=False, tables=None):
     """ブックを読む。"""
     if not os.path.splitext(path)[1].lower() in (".xlsx", ".xlsm"):
         raise WorkbookError("Excel のブック（.xlsx）を指定してください: %s" % path)
@@ -727,6 +727,13 @@ def read(path, force=False, strict=False):
         raise WorkbookError("md-table-excel で書き出したブックではありません（管理用シートが無い）")
     data = WorkbookData()
     _read_meta(workbook[META_SHEET], data)
+    if tables is not None:
+        numbers = [table.number for table in data.tables]
+        for number in tables:
+            if number not in numbers:
+                raise WorkbookError("ブックに表 %d はありません（ブックの表: %s）"
+                                    % (number, ", ".join(str(n) for n in numbers)))
+        data.tables = [table for table in data.tables if table.number in tables]
     known_titles = set()
     for table in data.tables:
         name = NAME_PREFIX + str(table.number)
@@ -752,6 +759,6 @@ def read(path, force=False, strict=False):
         table.sheet_title = sheet.title
         table.model = _read_table_sheet(sheet, start, table, force, strict)
     for title in workbook.sheetnames:
-        if title not in known_titles and title not in (INDEX_SHEET, META_SHEET):
+        if tables is None and title not in known_titles and title not in (INDEX_SHEET, META_SHEET):
             data.warnings.append("シート「%s」はどの表とも対応しないので読まない" % title)
     return data

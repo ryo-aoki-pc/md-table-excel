@@ -5,7 +5,7 @@ import unittest
 from helpers import md_file, regions, texts
 
 from mdtable import blocks, sync
-from mdtable.document import Replacement, apply_replacements, find_tables
+from mdtable.document import MarkdownError, Replacement, apply_replacements, find_tables, select_tables
 from mdtable.model import Cell, TableModel
 
 
@@ -31,6 +31,41 @@ def rewrite(text, number, edit):
     new_text = apply_replacements(md, [replacement])
     problems = sync.verify(md, new_text, [replacement])
     return new_text, converted, problems
+
+
+class TableSelectionTest(unittest.TestCase):
+    def test_heading_selects_one_or_several_tables(self):
+        table = "| a |\n|---|\n| b |\n\n"
+        found = regions("# 導入\n\n" + table + table + "# 更新\n\n" + table)
+        self.assertEqual([r.number for r in select_tables(found, [" 導入 "])], [1, 2])
+        self.assertEqual([r.number for r in select_tables(found, ["更新"])], [3])
+        self.assertEqual([r.heading_line for r in found], [0, 0, 10])
+        self.assertEqual([r.number for r in select_tables(found, ["導入", "2", "L13"])], [1, 2, 3])
+
+    def test_duplicate_heading_is_ambiguous(self):
+        table = "| a |\n|---|\n| b |\n\n"
+        found = regions("# 導入\n\n" + table + "# 導入\n\n" + table)
+        with self.assertRaises(MarkdownError) as raised:
+            select_tables(found, ["導入"])
+        self.assertEqual(str(raised.exception),
+                         "見出し「導入」が複数あります（1 行目・7 行目）。番号か L行番号 で選んでください")
+        self.assertEqual([r.number for r in select_tables(found, ["L10"])], [2])
+
+    def test_duplicate_heading_without_table_is_not_ambiguous(self):
+        found = regions("# 導入\n\n本文\n\n# 導入\n\n| a |\n|---|\n")
+        self.assertEqual([r.number for r in select_tables(found, ["導入"])], [1])
+
+    def test_missing_heading_requires_exact_match(self):
+        found = regions("# 導入の手順\n\n| a |\n|---|\n")
+        with self.assertRaises(MarkdownError) as raised:
+            select_tables(found, ["導入"])
+        self.assertEqual(str(raised.exception),
+                         "直前の見出しが「導入」の表がありません（--table は番号・L行番号・直前の見出しの文字）")
+
+    def test_heading_line_without_heading_and_setext_heading(self):
+        found = regions("| a |\n|---|\n\n題\n===\n\n| b |\n|---|\n")
+        self.assertEqual([(r.heading, r.heading_line) for r in found], [("", None), ("題", 3)])
+        self.assertEqual(select_tables(found, ["題"]), [found[1]])
 
 
 class HtmlStructureTest(unittest.TestCase):
