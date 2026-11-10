@@ -258,12 +258,15 @@ def apply_replacements(md, replacements):
         last_ending = endings[end]
         new_lines = replacement.lines
         new_endings = [first_ending] * len(new_lines)
+        kept = set()
         matcher = difflib.SequenceMatcher(None, lines[start:end + 1], new_lines, autojunk=False)
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
                 for old, new in zip(range(i1, i2), range(j1, j2)):
                     new_endings[new] = endings[start + old] or first_ending
-        if new_endings:
+                    kept.add(new)
+        # 最後の行は、文書の最後に改行が無ければ無いまま。変えた行か足した行なら、元の最後の行の改行コード
+        if new_endings and (not last_ending or len(new_lines) - 1 not in kept):
             new_endings[-1] = last_ending
         lines[start:end + 1] = new_lines
         endings[start:end + 1] = new_endings

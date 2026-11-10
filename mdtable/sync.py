@@ -165,6 +165,8 @@ def import_workbook(xlsx_path, md_path=None, dry_run=False, force=False):
         if region.excluded is None:
             by_hash.setdefault(region.source_hash(), []).append(region)
 
+    # ブックの表の元の本文。同じ番号の今の表がこのどれかなら、文書の中で表を入れ替えたとみる
+    known_hashes = set(table.source_hash for table in data.tables)
     replacements = []
     for table in data.tables:
         label = "表 %d" % table.number
@@ -187,6 +189,7 @@ def import_workbook(xlsx_path, md_path=None, dry_run=False, force=False):
         if positional is not None and positional.excluded is not None:
             positional = None
         if (positional is not None and positional.source_hash() != table.source_hash
+                and positional.source_hash() not in known_hashes
                 and _already_applied(table.model, positional, md)):
             report.messages.append("%s: 適用済み（変更なし）" % label)
             continue
