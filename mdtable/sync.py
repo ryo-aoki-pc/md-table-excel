@@ -252,8 +252,11 @@ def import_workbook(xlsx_path, md_path=None, dry_run=False, force=False, keep_ki
         if lines == original:
             report.messages.append("%s（%s）: 変更なし" % (label, _range_text(region)))
             continue
-        for count, previous, unit in zip(_trailing_empty(model), _trailing_empty(region.parsed.model), ("行", "列")):
-            if count > previous:
+        old_model = region.parsed.model
+        # 行を消して空になった列と、列を消して空になった行は、中身を消したものではないので数えない
+        for count, previous, unit, kept in zip(_trailing_empty(model), _trailing_empty(old_model), ("行", "列"),
+                                               (model.cols >= old_model.cols, model.rows >= old_model.rows)):
+            if count > previous and kept:
                 report.warnings.append(
                     "%s: 末尾の %d %sが空になっている（%sごと消すなら、Excel で%sを削除する）"
                     % (label, count - previous, unit, unit, unit))

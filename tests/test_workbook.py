@@ -261,6 +261,9 @@ class ExportImportTest(unittest.TestCase):
             ("https://example.com", "https://example.com/"),
             ("連絡: user@example.com", "mailto:user@example.com"),
             ("[案内](https://example.com/guide)", "https://example.com/guide/"),
+            # Excel はスキームとホストを小文字にして覚える
+            ("HTTPS://EXAMPLE.COM/Path", "https://example.com/Path"),
+            ("https://example.com/案内", "https://example.com/%E6%A1%88%E5%86%85"),
         ]
         for text, target in cases:
             with self.subTest(target=target):
@@ -284,6 +287,23 @@ class ExportImportTest(unittest.TestCase):
         book.save(self.xlsx)
         self.assertEqual(workbook.read(self.xlsx).tables[0].warnings, [
             "シート「表1 文書」: ハイパーリンクは書き戻さない: A2（[文字](URL) の形で書く）"])
+
+    def test_html_header_format_and_bold_only(self):
+        # HTML の表: 太字 + 塗りつぶしは見出しなので警告しない。太字だけのセルは警告する
+        write(self.md, "<table>\n<tr><th>h</th><td>a</td></tr>\n<tr><td>b</td><td>c</td></tr>\n</table>\n")
+        self.export()
+        self.assertEqual(workbook.read(self.xlsx).tables[0].warnings, [])
+        book = openpyxl.load_workbook(self.xlsx)
+        sheet = book[self.sheet(1)]
+        sheet["B1"].font = openpyxl.styles.Font(b=True)
+        sheet["A2"].font = copy(sheet["A1"].font)
+        sheet["A2"].fill = copy(sheet["A1"].fill)
+        book.save(self.xlsx)
+        table = workbook.read(self.xlsx).tables[0]
+        self.assertEqual(table.warnings, [
+            "シート「表1」: セル全体の書式（太字・斜体・取り消し線・下線）は書き戻さない: B1（強調は ** などで書く）"])
+        self.assertTrue(table.model.anchors()[(1, 0)].header)
+        self.assertFalse(table.model.anchors()[(0, 1)].header)
 
     def test_rich_text_warning_is_preserved(self):
         from openpyxl.cell.rich_text import CellRichText, TextBlock
@@ -319,6 +339,20 @@ class ExportImportTest(unittest.TestCase):
         self.assertEqual(report.warnings, [
             "表 1: 末尾の 1 列が空になっている（列ごと消すなら、Excel で列を削除する）"])
         self.assertEqual(sync.list_tables(self.md)[0].parsed.model.cols, 2)
+
+    def test_deleted_rows_do_not_warn_about_columns(self):
+        # 見出しが空の表で本文の行を行ごと消しても、列が空になったとは言わない
+        write(self.md, "|   |   |\n|---|---|\n| 1 | 2 |\n")
+        self.export()
+        book = openpyxl.load_workbook(self.xlsx)
+        title = self.sheet(1)
+        book[title].delete_rows(2, 1)
+        book.defined_names["mdtable_1"].attr_text = "'%s'!$A$1:$B$1" % title
+        book.save(self.xlsx)
+        report = sync.import_workbook(self.xlsx)
+        self.assertEqual(report.errors, [])
+        self.assertEqual(report.warnings, [])
+        self.assertEqual(read(self.md), "|   |   |\n|---|---|\n")
 
     def test_original_empty_trailing_rows_and_columns_do_not_warn(self):
         write(self.md, "| a | |\n|---|---|\n| b | |\n| | |\n")

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import warnings
+from urllib.parse import unquote
 
 from .model import Cell, TableModel, normalize_text, sheet_form
 from .textwidth import text_width, wrapped_line_count
@@ -598,6 +599,21 @@ def _table_extent(ws, start):
     return (top, left, bottom, right), ignored
 
 
+def _link_in_text(link, text):
+    """ハイパーリンクのリンク先が、セルの文字に書いてあるか（無ければ捨てることになる）。
+
+    Excel は URL の入力に自動でリンクを付け、スキームとホストを小文字にして覚える。
+    """
+    target = link.target or link.location or ""
+    if target.lower().startswith("mailto:"):
+        target = target[7:]
+    target = target.rstrip("/")
+    if not target:
+        return True
+    haystack = text.lower()
+    return target.lower() in haystack or unquote(target).lower() in haystack
+
+
 def _read_table_sheet(ws, start, table, force, strict=False):
     from openpyxl.utils import get_column_letter
 
@@ -628,17 +644,15 @@ def _read_table_sheet(ws, start, table, force, strict=False):
             where = "シート「%s」の %s%d" % (ws.title, get_column_letter(c), r)
             text = _cell_text(source, table, force, where, strict)
             font = source.font
-            if text and (font.i or font.strike
-                         or (font.u not in (None, "none") and not source.hyperlink)
-                         or (font.b and source.fill.fill_type != "solid"
-                             and not (table.kind == "pipe" and r == top))):
+            fill = source.fill
+            if text and font is not None and (
+                    font.i or font.strike
+                    or (font.u not in (None, "none") and not source.hyperlink)
+                    or (font.b and (fill is None or fill.fill_type != "solid")
+                        and not (table.kind == "pipe" and r == top))):
                 styled.append(source.coordinate)
-            if source.hyperlink:
-                target = source.hyperlink.target or source.hyperlink.location or ""
-                if target.lower().startswith("mailto:"):
-                    target = target[7:]
-                if target and target.rstrip("/") not in text:
-                    hyperlinks.append(source.coordinate)
+            if source.hyperlink and not _link_in_text(source.hyperlink, text):
+                hyperlinks.append(source.coordinate)
             if source.comment is not None:
                 comments.append(source.coordinate)
             cells.append(Cell(r - top, c - left, text, rowspan, colspan,
