@@ -19,6 +19,8 @@ from .workbook import WorkbookError
 USER_ERRORS = (MarkdownError, MdTableError, WorkbookError, OSError)
 POLL_SECONDS = 0.3
 EOF_GRACE_SECONDS = 30
+# Excel が開くのを待つ秒。この間の Enter は、ブックが開いたか（~$ が現れたか）を見てから扱う
+OPEN_GRACE_SECONDS = 3
 
 
 def _prepare_streams():
@@ -148,9 +150,26 @@ def _wait_until_closed(directory, xlsx):
 
     threading.Thread(target=read_input, daemon=True).start()
     requests.put(True)
+    started = time.monotonic()
     seen_owner = False
     confirming = False
     eof_deadline = None
+    held = None     # Excel が開く前に届いた 1 行
+
+    def answered(answer):
+        """ブックが開いている間に届いた 1 行を扱う。このまま取り込むなら True。"""
+        nonlocal confirming
+        if confirming and answer.strip().lower() == "y":
+            return True
+        if not confirming:
+            _err("ブックがまだ開いているようです。保存して閉じると自動で進みます"
+                 "（このまま取り込むなら y を入力して Enter）")
+            confirming = True
+        # 入力がすぐ返る場合も、次の確認まで間隔を空ける
+        time.sleep(POLL_SECONDS)
+        requests.put(True)
+        return False
+
     try:
         while True:
             owners = _owner_files(directory)
@@ -165,6 +184,17 @@ def _wait_until_closed(directory, xlsx):
                 else:
                     _err("ブックが閉じられたので取り込みます")
                     return
+            if held is not None:
+                # Excel が開く前の Enter は、~$ が現れるか、開くのを待つ時間が過ぎてから扱う
+                if owners:
+                    answer, held = held, None
+                    if answered(answer):
+                        return
+                elif time.monotonic() - started >= OPEN_GRACE_SECONDS:
+                    return
+                else:
+                    time.sleep(POLL_SECONDS)
+                continue
             try:
                 kind, answer = results.get(timeout=POLL_SECONDS)
             except queue.Empty:
@@ -174,18 +204,14 @@ def _wait_until_closed(directory, xlsx):
             if kind == "eof":
                 eof_deadline = time.monotonic() + EOF_GRACE_SECONDS
             elif kind == "line":
-                if not _owner_files(directory):
+                if _owner_files(directory):
+                    seen_owner = True
+                    if answered(answer):
+                        return
+                elif seen_owner or time.monotonic() - started >= OPEN_GRACE_SECONDS:
                     return
-                seen_owner = True
-                if confirming and answer.strip().lower() == "y":
-                    return
-                if not confirming:
-                    _err("ブックがまだ開いているようです。保存して閉じると自動で進みます"
-                         "（このまま取り込むなら y を入力して Enter）")
-                    confirming = True
-                # 入力がすぐ返る場合も、次の確認まで間隔を空ける
-                time.sleep(POLL_SECONDS)
-                requests.put(True)
+                else:
+                    held = answer
             if eof_deadline is not None and not seen_owner and time.monotonic() >= eof_deadline:
                 raise EOFError
     finally:

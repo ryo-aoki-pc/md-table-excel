@@ -231,6 +231,7 @@ class CliTest(unittest.TestCase):
                 mock.patch.object(cli.os, "startfile", startfile, create=True), \
                 mock.patch.object(cli.tempfile, "mkdtemp", return_value=directory), \
                 mock.patch.object(cli, "_read_line", read_input), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
                 mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
                 redirect_stderr(stderr), redirect_stdout(stdout):
@@ -399,6 +400,7 @@ class CliTest(unittest.TestCase):
         stderr = io.StringIO()
         with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
                 mock.patch.object(cli, "_read_line", side_effect=EOFError), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 mock.patch.object(builtins, "open", side_effect=open_book), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
                 redirect_stderr(stderr):
@@ -414,12 +416,61 @@ class CliTest(unittest.TestCase):
         reader = mock.Mock(side_effect=EOFError)
         with mock.patch.object(cli, "_owner_files", side_effect=lambda directory: next(names, [])), \
                 mock.patch.object(cli, "_read_line", reader), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 mock.patch.object(cli, "POLL_SECONDS", 0.002), \
-                mock.patch.object(cli, "EOF_GRACE_SECONDS", 0.02), \
+                mock.patch.object(cli, "EOF_GRACE_SECONDS", 30), \
                 redirect_stderr(stderr):
             cli._wait_until_closed(self.dir, self.xlsx)
         self.assertIn("ブックが閉じられたので取り込みます", stderr.getvalue())
         self.assertEqual(reader.call_count, 1)
+
+    def test_edit_enter_before_excel_opens_waits_for_owner(self):
+        # Excel が開く前に Enter を押しても終わらず、ブックが開いたら「開いている間の Enter」として扱う
+        with open(self.xlsx, "wb") as handle:
+            handle.write(b"book")
+        held, release_input = threading.Event(), threading.Event()
+        self.addCleanup(release_input.set)
+        answers = iter([""])
+
+        def read_input():
+            try:
+                return next(answers)
+            except StopIteration:
+                release_input.wait(5)
+                raise KeyboardInterrupt
+
+        calls = []
+
+        def owners(directory):
+            calls.append(None)
+            # 最初の何回かはまだ開いていない。開いた後、確かめの文を出してから閉じる
+            if len(calls) <= 3:
+                return []
+            return ["~$book.xlsx"] if len(calls) <= 8 else []
+
+        stderr = io.StringIO()
+        with mock.patch.object(cli, "_owner_files", side_effect=owners), \
+                mock.patch.object(cli, "_read_line", side_effect=read_input), \
+                mock.patch.object(cli, "POLL_SECONDS", 0.002), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 30), \
+                redirect_stderr(stderr):
+            cli._wait_until_closed(self.dir, self.xlsx)
+        release_input.set()
+        self.assertEqual(stderr.getvalue().count("ブックがまだ開いているようです"), 1)
+        self.assertIn("ブックが閉じられたので取り込みます", stderr.getvalue())
+
+    def test_edit_enter_without_owner_proceeds_after_open_grace(self):
+        # ~$ が現れない環境では、開くのを待つ時間が過ぎたら Enter で進む
+        stderr = io.StringIO()
+        started = time.monotonic()
+        with mock.patch.object(cli, "_owner_files", return_value=[]), \
+                mock.patch.object(cli, "_read_line", return_value=""), \
+                mock.patch.object(cli, "POLL_SECONDS", 0.002), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0.2), \
+                redirect_stderr(stderr):
+            cli._wait_until_closed(self.dir, self.xlsx)
+        self.assertGreaterEqual(time.monotonic() - started, 0.2)
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_edit_missing_markdown_keeps_workbook_and_command(self):
         code, out, err, directory = self._run_edit(
@@ -499,6 +550,7 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", fake_startfile, create=True), \
                 mock.patch.object(cli, "_read_line", lambda *a: ""), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 0, stderr.getvalue())
@@ -524,6 +576,7 @@ class CliTest(unittest.TestCase):
                         mock.patch.object(cli.os, "startfile", fake_startfile, create=True), \
                         mock.patch.object(cli.tempfile, "mkdtemp", return_value=directory), \
                         mock.patch.object(cli, "_read_line", lambda *a: ""), \
+                        mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                         redirect_stderr(stderr), redirect_stdout(io.StringIO()):
                     code = cli.main(["edit", self.md, option])
                 self.assertEqual(code, 1, stderr.getvalue())
@@ -539,6 +592,7 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", lambda path: None, create=True), \
                 mock.patch.object(cli, "_read_line", lambda *a: ""), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 0)
@@ -552,6 +606,7 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(cli.os, "name", "nt"), \
                 mock.patch.object(cli.os, "startfile", lambda path: None, create=True), \
                 mock.patch.object(cli, "_read_line", interrupt), \
+                mock.patch.object(cli, "OPEN_GRACE_SECONDS", 0), \
                 redirect_stderr(stderr), redirect_stdout(io.StringIO()):
             code = cli.main(["edit", self.md])
         self.assertEqual(code, 1)
@@ -578,6 +633,14 @@ class CliTest(unittest.TestCase):
             "from mdtable import cli",
             "cli.os.name = 'nt'",
             "cli.POLL_SECONDS = 0.05",
+            "seen = threading.Event()",
+            "original = cli._owner_files",
+            "def owners(directory):",
+            "    names = original(directory)",
+            "    if names:",
+            "        seen.set()",
+            "    return names",
+            "cli._owner_files = owners",
             "def startfile(path):",
             "    def work():",
             "        owner = os.path.join(os.path.dirname(path), '~$' + os.path.basename(path))",
@@ -587,7 +650,7 @@ class CliTest(unittest.TestCase):
             "        sheet['A2'].value = 'lazygit2'",
             "        sheet['A2'].data_type = 's'",
             "        book.save(path)",
-            "        time.sleep(0.3)",
+            "        seen.wait(30)",
             "        os.remove(owner)",
             "    threading.Thread(target=work).start()",
             "os.startfile = startfile",
