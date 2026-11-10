@@ -166,6 +166,48 @@ class ConvertTest(unittest.TestCase):
         self.assertFalse(report.errors, report.errors)
         self.assertEqual(self.read(), "| a |\n| :---: |\n| b |\n")
 
+    def test_refuses_alignment_on_table_section_and_row(self):
+        # 配置として読むのはセルの属性だけ。<table>・<tbody>・<tr> の配置は、パイプ表にすると消えるので変えない
+        cases = [
+            ("<table align='center'>\n<tr><th>h</th></tr>\n<tr><td>a</td></tr>\n</table>\n", "<table>"),
+            ("<table>\n<tr><th>h</th></tr>\n<tbody style='text-align: right'><tr><td>a</td></tr></tbody>\n</table>\n",
+             "<tbody>"),
+            ("<table>\n<tr align='right'><th>h</th></tr>\n<tr><td>a</td></tr>\n</table>\n", "<tr>"),
+        ]
+        for text, tag in cases:
+            with self.subTest(tag=tag):
+                self.assert_refused(text, "%s にパイプ表では残せない属性" % tag)
+
+    def test_refuses_nested_table_in_cell(self):
+        report = self.assert_refused(
+            "<table>\n<tr><th>h</th></tr>\n"
+            "<tr><td><table><tr><th>入れ子</th></tr><tr><td>データ</td></tr></table></td></tr>\n</table>\n",
+            "セルの中に入れ子の表（<table> など）がある")
+        self.assertIn("2 行 1 列", report.errors[0])
+
+    def test_refuses_two_rows_in_thead(self):
+        self.assert_refused(
+            "<table>\n<thead>\n<tr><th>見出し 1</th></tr>\n<tr><td>見出し 2</td></tr>\n</thead>\n"
+            "<tbody>\n<tr><td>データ</td></tr>\n</tbody>\n</table>\n", "<thead> に 2 行以上ある")
+
+    def test_code_with_pipe_and_table_tag_text(self):
+        # コードの中の | は \| と書け、読み直すと同じ文字になる。コードの中の <table> の文字は入れ子の表ではない
+        self.write("<table>\n<tr><th>h</th></tr>\n<tr><td><code>a|b</code> と <code>&lt;table&gt;</code></td></tr>\n</table>\n")
+        report = convert(self.path, ["1"], "pipe")
+        self.assertFalse(report.errors, report.errors)
+        self.assertEqual(self.read(), "| h |\n| --- |\n| `a\\|b` と `<table>` |\n")
+
+    def test_table_in_description_list(self):
+        # 説明リストの説明の中の表も、接頭辞を保って変える
+        text = "用語\n: <table>\n  <tr><th>h</th></tr>\n  <tr><td>a</td></tr>\n  </table>\n"
+        self.write(text)
+        location = regions(text)[0].location
+        self.assertIn("説明リスト", location)
+        report = convert(self.path, ["1"], "pipe")
+        self.assertFalse(report.errors, report.errors)
+        self.assertEqual(self.read(), "用語\n: | h |\n  | --- |\n  | a |\n")
+        self.assertEqual(regions(self.read())[0].location, location)
+
     def test_refuses_interstitial_comments(self):
         for text in ("<table><!-- 注 --><tr><th>a</th></tr></table>\n",
                      "<table><tr><!-- 注 --><th>a</th></tr></table>\n"):
