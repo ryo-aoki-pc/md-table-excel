@@ -329,7 +329,11 @@ def _html_block_name(doc, node):
     if first.startswith("<!--"):
         return "コメント"
     match = re.match(r"</?([A-Za-z][A-Za-z0-9-]*)", first)
-    return "<%s>" % match.group(1).lower() if match else "HTML"
+    if match:
+        return "<%s>" % match.group(1).lower()
+    # <![CDATA[・<?xml・<!DOCTYPE などは、開きの記号を出す
+    match = re.match(r"<[!?][A-Za-z\[]*", first)
+    return match.group(0) if match else "HTML"
 
 
 def _check_conversion_cells(region, target):

@@ -31,7 +31,10 @@ def parse(text):
 
 
 def normalize_list_spacing(text):
-    """最外側の段落を中断できるリストの前だけ、空行を除く。"""
+    """最外側の段落を中断できるリストの前だけ、空行を除く。
+
+    改行を LF にそろえた文字（normalize_text の後）に使う。
+    """
     if "\n\n" not in text:
         return text
     doc = parse(text)

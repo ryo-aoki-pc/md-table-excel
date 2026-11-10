@@ -376,7 +376,8 @@ class ConvertTest(unittest.TestCase):
 
     def test_html_block_error_names_the_tag(self):
         # 文の後の <br> の直後のリストは、<ul> のまま読まれて HTML のブロックになる
-        cases = [("文<br><ul><li>項目</li></ul>", "<ul>"), ("<DIV>**太字**</DIV>", "<div>")]
+        cases = [("文<br><ul><li>項目</li></ul>", "<ul>"), ("<DIV>**太字**</DIV>", "<div>"),
+                 ("<![CDATA[ a ]]> **太字**", "<![CDATA["), ("<?php echo 1; ?> **太字**", "<?php")]
         for cell, name in cases:
             source = "| 見出し |\n| --- |\n| " + cell + " |\n"
             self.write(source)

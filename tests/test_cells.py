@@ -33,6 +33,12 @@ class ListSpacingTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(normalize_list_spacing(text), text)
 
+    def test_alternating_paragraphs_and_lists(self):
+        text = "段落 1\n\n- 項目 1\n\n段落 2\n\n- 項目 2"
+        expected = "段落 1\n- 項目 1\n\n段落 2\n- 項目 2"
+        self.assertEqual(normalize_list_spacing(text), expected)
+        self.assertEqual(normalize_list_spacing(expected), expected)
+
     def test_keeps_blank_lines_inside_loose_list(self):
         text = "前\n\n1. 一\n\n   - 中\n\n2. 二"
         self.assertEqual(normalize_list_spacing(text), text.replace("前\n\n", "前\n", 1))
