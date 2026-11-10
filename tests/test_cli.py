@@ -4,6 +4,7 @@ import builtins
 import io
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -12,7 +13,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from helpers import run_cli
+from helpers import ROOT, run_cli
 
 import openpyxl
 
@@ -559,6 +560,69 @@ class CliTest(unittest.TestCase):
         path = kept[0].split(": ", 1)[1]
         self.assertTrue(os.path.exists(path))
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+
+    def test_edit_reports_temporary_directory_it_cannot_remove(self):
+        # ブックを開いたまま取り込むと、Excel がブックを使っていて一時フォルダーを消せない
+        with mock.patch.object(cli.shutil, "rmtree"):
+            code, out, err, directory = self._run_edit(self._change_edit_workbook)
+        self.assertEqual(code, 0, err)
+        self.assertIn("一時フォルダーを消せませんでした（ブックを閉じてから消してください）: " + directory, err)
+
+    def test_edit_ends_normally_with_open_stdin_pipe(self):
+        # 標準入力が、何も届かないまま開いているパイプでも、ブックを閉じたら取り込んで普通に終わる
+        # （読み待ちのスレッドを残したまま、別のプロセスとして終われること）
+        driver = "\n".join([
+            "import os, sys, threading, time",
+            "sys.path.insert(0, sys.argv[1])",
+            "import openpyxl",
+            "from mdtable import cli",
+            "cli.os.name = 'nt'",
+            "cli.POLL_SECONDS = 0.05",
+            "def startfile(path):",
+            "    def work():",
+            "        owner = os.path.join(os.path.dirname(path), '~$' + os.path.basename(path))",
+            "        open(owner, 'w').close()",
+            "        book = openpyxl.load_workbook(path)",
+            "        sheet = book[book.sheetnames[1]]",
+            "        sheet['A2'].value = 'lazygit2'",
+            "        sheet['A2'].data_type = 's'",
+            "        book.save(path)",
+            "        time.sleep(0.3)",
+            "        os.remove(owner)",
+            "    threading.Thread(target=work).start()",
+            "os.startfile = startfile",
+            "sys.exit(cli.main(['edit', sys.argv[2]]))",
+        ])
+        environment = dict(os.environ)
+        environment.pop("MDTABLE_DEBUG", None)
+        process = subprocess.Popen([sys.executable, "-B", "-c", driver, ROOT, self.md],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=environment)
+        try:
+            code = process.wait(timeout=60)
+            err = process.stderr.read().decode("utf-8", "replace")
+        finally:
+            if process.poll() is None:
+                process.kill()
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+        self.assertEqual(code, 0, err)
+        self.assertIn("ブックが閉じられたので取り込みます", err)
+        self.assertNotIn("Fatal Python error", err)
+        self.assertNotIn("Traceback", err)
+        with open(self.md, encoding="utf-8") as handle:
+            self.assertIn("| lazygit2 |", handle.read())
+
+    def test_os_error_message(self):
+        # ファイル名の無い OSError でも、先頭に「: 」だけが付かない
+        for error, expected in ((OSError("壊れた"), "エラー: 壊れた"),
+                                (OSError(2, "見つからない", "x.md"), "エラー: x.md: 見つからない")):
+            with self.subTest(expected=expected):
+                stderr = io.StringIO()
+                with mock.patch.object(cli, "list_tables", side_effect=error), redirect_stderr(stderr):
+                    code = cli.main(["list", self.md])
+                self.assertEqual(code, 1)
+                self.assertEqual(stderr.getvalue().strip(), expected)
 
     def test_edit_needs_windows(self):
         stderr = io.StringIO()

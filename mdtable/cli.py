@@ -230,6 +230,9 @@ def cmd_edit(args):
     finally:
         if not keep:
             shutil.rmtree(directory, ignore_errors=True)
+            if os.path.isdir(directory):
+                # ブックを開いたまま取り込んだときは、Excel がブックを使っていて消せない
+                _err("一時フォルダーを消せませんでした（ブックを閉じてから消してください）: %s" % directory)
 
 
 def build_parser():
@@ -285,7 +288,9 @@ def main(argv=None):
             raise
         message = str(error)
         if isinstance(error, OSError) and not isinstance(error, (MarkdownError,)):
-            message = "%s: %s" % (getattr(error, "filename", "") or "", error.strerror or error)
+            message = "%s" % (error.strerror or error,)
+            if getattr(error, "filename", None):
+                message = "%s: %s" % (error.filename, message)
         _err("エラー: " + message)
         return 1
     except KeyboardInterrupt:
