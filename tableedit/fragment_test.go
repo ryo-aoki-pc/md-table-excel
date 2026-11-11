@@ -44,6 +44,11 @@ func TestFragmentFixtureRoundTrip(t *testing.T) {
 					continue
 				}
 				count++
+				// -race では 10 倍以上遅くなり、CI の時間の上限を超える。この試験は並行の処理を含まないので、
+				// race の検査では 8 表に 1 表だけを回す（race 無しの試験では全表を回す）。
+				if raceEnabled && count%8 != 1 {
+					continue
+				}
 				t.Run(fmt.Sprintf("%s/%d", filepath.Base(path), tab.Number), func(t *testing.T) {
 					blocked := false
 					for _, c := range tab.Cells {
