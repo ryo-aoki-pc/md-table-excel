@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tablesync "github.com/ryo-aoki-pc/md-table-excel/internal/sync"
 )
@@ -118,7 +119,12 @@ func runGoldenWorker(t *testing.T, requests ...goldenRequest) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPythonGoldenWorker$", "-test.timeout=2m")
+	// 子の時間の制限は、親のテストの残り時間にする（-race では子が遅くなるので、決め打ちにしない）
+	timeout := "-test.timeout=0"
+	if deadline, ok := t.Deadline(); ok {
+		timeout = "-test.timeout=" + time.Until(deadline).Round(time.Second).String()
+	}
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPythonGoldenWorker$", timeout)
 	command.Dir = filepath.Join(pythonTestdataDir, "..", "internal", "cli")
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
