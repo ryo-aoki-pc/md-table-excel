@@ -17,6 +17,7 @@
 **参照**
 
 - [md-table-excel](../README.md)
+- 検証記録（setup-notes-verification の `repos/md-table-excel/docs/verification/readme.md`）
 
 </details>
 

@@ -24,7 +24,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 
 # ライセンスの出力には、ビルドしたホストで動く一時的な実行ファイルを使う。
 temporary_dir=$(mktemp -d)
-license_binary="$temporary_dir/mdtable.exe"
+license_binary="$temporary_dir/mdtable$(go env GOEXE)"
 trap 'rm -f -- "$license_binary"; rmdir -- "$temporary_dir"' EXIT
 CGO_ENABLED=0 GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" go build \
   -trimpath -buildvcs=false \
