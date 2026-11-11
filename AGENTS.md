@@ -23,6 +23,8 @@ Windows 11 の導入・更新の手順は [docs/install.md](docs/install.md)、�
 - `internal/version/version.go` — 版を置く 1 か所
 - `licenses.go`・`licenses/` — 実行ファイルに同梱するライセンスの原文と一覧。`--licenses` で全文を出す
 - `licenses_test.go`・`internal/cli/licenses_test.go` — 依存の版・原文と、ライセンスの表示の検査
+- `testdata/` — テストの入力と正解。`documents/`（見本と乱数の文書）、`goldens.json.gz`（文書ごとのコマンドの出力の正解。版は `<VERSION>`）、`unit/`（単体テストの入力と期待値）、`workbooks.zip`（openpyxl で作って編集したブック）、`comrak_ast.mjs`（comrak と突き合わせるテストが使う）
+  - 正解は Python 版 0.5.2 の出力から作った。`regenerate.py` などは作った方法の記録で、Python 版が無いので今は動かない。正解を直すときは、期待値を手で直し、理由をコミットに書く
 - `scripts/build-release.sh` — Windows の amd64 向けの実行ファイル、ライセンス全文、sha256 の一覧を作る
 - `.github/workflows/test.yml`・`release.yml` — Go の検査と配布物のビルド、タグによる Releases への配布
 - `docs/install.md` — Windows 11 の導入・更新の手順
