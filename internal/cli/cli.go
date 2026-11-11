@@ -8,6 +8,7 @@ import (
 	"github.com/ryo-aoki-pc/md-table-excel/internal/pycompat"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/sync"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/table"
+	"github.com/ryo-aoki-pc/md-table-excel/internal/version"
 	"io"
 	"os"
 	"os/signal"
@@ -292,7 +293,7 @@ func mainContext(ctx context.Context, argv []string, open func(string) error) (c
 		return 1
 	}
 	if len(argv) == 1 && argv[0] == "--version" {
-		fmt.Fprintln(stdout, "mdtable 0.5.2")
+		fmt.Fprintln(stdout, "mdtable "+version.Version)
 		return 0
 	}
 	for _, s := range argv {

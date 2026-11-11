@@ -12,6 +12,7 @@ import (
 	"github.com/ryo-aoki-pc/md-table-excel/internal/model"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/pycompat"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/table"
+	"github.com/ryo-aoki-pc/md-table-excel/internal/version"
 	"github.com/ryo-aoki-pc/md-table-excel/internal/workbook"
 )
 
@@ -105,7 +106,7 @@ func ExportContext(ctx context.Context, path, output string, selectors []string,
 	if e != nil {
 		return nil, e
 	}
-	if e = workbook.WriteContext(ctx, output, mdPath, tables, excluded, "0.5.2"); e != nil {
+	if e = workbook.WriteContext(ctx, output, mdPath, tables, excluded, version.Version); e != nil {
 		return nil, e
 	}
 	for _, t := range tables {
@@ -212,7 +213,7 @@ func ImportWorkbookContext(ctx context.Context, xlsx, mdPath string, dryRun, for
 			}
 		}
 	}
-	if _, e := os.Stat(mdPath); mdPath == "" || os.IsNotExist(e) {
+	if _, e := os.Stat(mdPath); mdPath == "" || e != nil {
 		display := mdPath
 		if display == "" {
 			display = "None"

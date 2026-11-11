@@ -320,7 +320,7 @@ func cmdEdit(ctx context.Context, a args, open func(string) error) (code int, re
 	if e = waitUntilClosed(ctx, directory, xlsx); e != nil {
 		return 1, e
 	}
-	if _, e = os.Stat(markdown); errors.Is(e, os.ErrNotExist) {
+	if _, e = os.Stat(markdown); e != nil {
 		return 1, fmt.Errorf("書き戻す Markdown が見つかりません（--md で指定してください）: %s", markdown)
 	}
 	after, e := fileHash(xlsx)

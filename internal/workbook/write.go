@@ -446,8 +446,9 @@ func WriteContext(ctx context.Context, path, mdPath string, tables []*ExportTabl
 		fmt.Fprintf(&workbook, `<definedName name="%s%d">%s</definedName>`, NamePrefix, t.Region.Number, xmlText(ref))
 	}
 	workbook.WriteString("</definedNames></workbook>")
-	fmt.Fprintf(&rels, `<Relationship Id="rId%d" Type="%s/styles" Target="styles.xml"/></Relationships>`, len(sheets)+1, relNS)
-	types.WriteString("</Types>")
+	fmt.Fprintf(&rels, `<Relationship Id="rId%d" Type="%s/styles" Target="styles.xml"/>`, len(sheets)+1, relNS)
+	fmt.Fprintf(&rels, `<Relationship Id="rId%d" Type="%s/theme" Target="theme/theme1.xml"/></Relationships>`, len(sheets)+2, relNS)
+	types.WriteString(`<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/></Types>`)
 	if e := ctx.Err(); e != nil {
 		return e
 	}
@@ -464,10 +465,20 @@ func WriteContext(ctx context.Context, path, mdPath string, tables []*ExportTabl
 		if e != nil {
 			return e
 		}
-		_, e = w.Write([]byte(xml.Header + body))
+		if !strings.HasPrefix(body, "<?xml") {
+			body = xml.Header + body
+		}
+		_, e = w.Write([]byte(body))
 		return e
 	}
-	parts := [][2]string{{"[Content_Types].xml", types.String()}, {"_rels/.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="` + relNS + `/officeDocument" Target="xl/workbook.xml"/></Relationships>`}, {"xl/workbook.xml", workbook.String()}, {"xl/_rels/workbook.xml.rels", rels.String()}, {"xl/styles.xml", styles.XML()}}
+	parts := [][2]string{
+		{"[Content_Types].xml", types.String()},
+		{"_rels/.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="` + relNS + `/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+		{"xl/workbook.xml", workbook.String()},
+		{"xl/_rels/workbook.xml.rels", rels.String()},
+		{"xl/styles.xml", styles.XML()},
+		{"xl/theme/theme1.xml", defaultTheme},
+	}
 	for i, s := range sheets {
 		parts = append(parts, [2]string{fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1), s.XML()})
 	}
