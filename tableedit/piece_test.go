@@ -152,6 +152,20 @@ func TestFragmentHTMLPastePreservesRaw(t *testing.T) {
 	})
 }
 
+// 値だけの写し（信用しない JSON）の穴は空のセルとして貼り、貼り付け先も穴なら飛ばす。
+func TestFragmentValuesHoleOverHole(t *testing.T) {
+	f, err := tableedit.ParseFragment([]byte(`{"version":1,"kind":"","shape":"cells","rows":2,"cols":2,"cells":[` +
+		`{"row":0,"col":0,"rowspan":1,"colspan":1,"text":"X","tag":"","source":""},` +
+		`{"row":0,"col":1,"rowspan":1,"colspan":1,"text":"Y","tag":"","source":""},` +
+		`{"row":1,"col":0,"rowspan":1,"colspan":1,"text":"Z","tag":"","source":""}],"row_tags":[],"delimiters":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkPieceText(t, "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>", "<table><tr><td>X</td><td>Y</td></tr><tr><td>Z</td></tr></table>", func(d *tableedit.Document) (*tableedit.Result, error) {
+		return d.PasteFragment(tableedit.Target{Number: 1}, 0, 0, f)
+	})
+}
+
 func TestFragmentOperationRejections(t *testing.T) {
 	merged := copyRect(t, tableedit.Parse("<table><tr><td colspan='2'>x</td></tr></table>"), tableedit.Rect{Rows: 1, Cols: 2})
 	one := copyRect(t, tableedit.Parse("<table><tr><td>x</td></tr></table>"), tableedit.Rect{Rows: 1, Cols: 1})

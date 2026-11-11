@@ -30,6 +30,30 @@ func TestSourceExpectationsRejectByteChanges(t *testing.T) {
 	}
 }
 
+func TestSourceExpectationsReportInOrder(t *testing.T) {
+	input := "<table><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>d</td><td>e</td><td>f</td></tr></table>"
+	md := table.NewMarkdown("", input, false)
+	r := table.FindTables(md)[0]
+	// 期待をすべてずらし、期待に無いセルも 1 個入れる。誤りの文は行・列の順に毎回同じになる。
+	e := &table.Expectation{Cells: map[model.Position]string{}, RowTags: []string{"<tr>", "<tr>"}, Sections: []int{2}}
+	for _, p := range []model.Position{{Row: 0, Col: 0}, {Row: 0, Col: 1}, {Row: 0, Col: 2}, {Row: 1, Col: 0}, {Row: 1, Col: 1}} {
+		e.Cells[p] = "<td>x</td>"
+	}
+	want := ""
+	for i := 0; i < 20; i++ {
+		repl := &table.Replacement{Region: r, Lines: []string{input}, Model: r.Model(), TargetKind: "html", Expect: e}
+		got := strings.Join(verify.Check(md, input, []*table.Replacement{repl}, verify.Options{KeepHoles: true}).Problems, "/")
+		if i == 0 {
+			want = got
+			if !strings.HasPrefix(got, "表 1: セル（1 行 1 列）") || !strings.Contains(got, "期待していないセル（2 行 3 列）") {
+				t.Fatalf("誤りの文の順か中身が違う: %s", got)
+			}
+		} else if got != want {
+			t.Fatalf("誤りの文の順が変わった:\n%s\n%s", want, got)
+		}
+	}
+}
+
 func TestSourceExpectationsCheckHolesAndPipeBodies(t *testing.T) {
 	input := "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>"
 	md := table.NewMarkdown("", input, false)

@@ -104,9 +104,17 @@ func pieceNotes(p *table.Piece, kind string) []string {
 				notes = append(notes, fmt.Sprintf("写したセル（%d 行 %d 列）にリンク参照の定義がある。同じ名前の定義は文書の最初のものが使われる", c.Row+1, c.Col+1))
 			}
 			if kind != "html" {
+				// 同じ文書から写したセルは終了タグが省略されていることがある。中身は開始タグの後ろから、
+				// 最後の字句が同じ名前の終了タグならその前まで、無ければ原文の終わりまでとする。
 				tokens := htmltok.Tokenize(c.Raw, 0, len(c.Raw))
-				source := c.Raw[tokens[0].End:tokens[len(tokens)-1].Start]
-
+				source := ""
+				if len(tokens) > 0 && tokens[0].Kind == "start" {
+					end, last := len(c.Raw), tokens[len(tokens)-1]
+					if len(tokens) > 1 && last.Kind == "end" && last.Name == tokens[0].Name {
+						end = last.Start
+					}
+					source = c.Raw[tokens[0].End:end]
+				}
 				if complexCell(c.Text, source, c.Links) {
 					notes = append(notes, fmt.Sprintf("写した複雑なセル（%d 行 %d 列）は、値だけを貼った", c.Row+1, c.Col+1))
 				}
@@ -289,7 +297,8 @@ func (d *Document) PasteFragment(t Target, row, col int, f *Fragment) (result *R
 		}
 		for i := 0; i < p.Rows; i++ {
 			for j := 0; j < p.Cols; j++ {
-				if !grid[model.Position{Row: i, Col: j}] {
+				// 写しの穴は空のセルとして貼る。貼り付け先も穴なら、書くセルが無いので飛ばす。
+				if !grid[model.Position{Row: i, Col: j}] && !m.Holes[model.Position{Row: row + i, Col: col + j}] {
 					edits = append(edits, CellEdit{Row: row + i, Col: col + j, Text: ""})
 				}
 			}
