@@ -10,6 +10,7 @@ Windows 11 の導入・更新の手順は [docs/install.md](docs/install.md)、�
 
 ## 構成
 
+- `LICENSE` — md-table-excel の MIT ライセンス。`--licenses` の最初に出す
 - `go.mod`・`go.sum` — Go のモジュールと依存
 - `cmd/mdtable/` — コマンドの入口。処理は `internal/cli/`
 - `internal/blocks/`・`internal/inline/` — comrak と同じ規則のブロック解析と、コードスパン・生の HTML・数式などの走査
@@ -20,7 +21,7 @@ Windows 11 の導入・更新の手順は [docs/install.md](docs/install.md)、�
 - `internal/changes/`・`internal/sync/` — 変更の要約とセルの一覧、書き出し・取り込み・書き戻した結果の確認
 - `internal/workbook/` — ブックの書き出しと読み込み。書き出しは自前の XML と ZIP、読み込みは excelize
 - `internal/pycompat/` — 文字・差分・数値などの互換処理。`gen_tables.py`・`gen_testdata.py` は Unicode などの表と正解データを作り直すためのスクリプトで、そのときだけ Python 3 が要る
-- `internal/version/version.go` — 版を置く 1 か所
+- `internal/version/version.go` — 版を置く所。`licenses/manifest.json` の md-table-excel の版も同じにする（テストが照合する）
 - `licenses.go`・`licenses/` — 実行ファイルに同梱するライセンスの原文と一覧。`--licenses` で全文を出す
 - `licenses_test.go`・`internal/cli/licenses_test.go` — 依存の版・原文と、ライセンスの表示の検査
 - `testdata/` — テストの入力と正解。`documents/`（見本と乱数の文書）、`goldens.json.gz`（文書ごとのコマンドの出力の正解。版は `<VERSION>`）、`unit/`（単体テストの入力と期待値）、`workbooks.zip`（openpyxl で作って編集したブック）、`comrak_ast.mjs`（comrak と突き合わせるテストが使う）
@@ -52,7 +53,7 @@ go test ./...
 
 - Go は gofmt で整える。コードのコメントと利用者に出すメッセージは日本語で書く
 - 移した元の関数名のコメントは記録として残す
-- 版は `internal/version/version.go` の `Version` で決める。`v<版>` のタグを push すると、タグと版を照合して GitHub Releases に Windows の amd64 向けの実行ファイルを配布する
+- 版は `internal/version/version.go` の `Version` で決め、`licenses/manifest.json` の md-table-excel の版も合わせる。`v<版>` のタグを push すると、タグと版を照合して GitHub Releases に Windows の amd64 向けの実行ファイルを配布する
 - エラーは日本語 1 行で出し、想定外の失敗のスタックは `MDTABLE_DEBUG=1` のときだけ出す
 - 表の検出やブロックの規則を変えたら、Go のテストで comrak と突き合わせる。GitLab の描画に関わる変更は、GitLab の Markdown API（`/api/v4/markdown`）でも確かめ、検証記録に残す
 - 変えていない表・行・セルを 1 文字も変えないことを、往復のテストで確かめる

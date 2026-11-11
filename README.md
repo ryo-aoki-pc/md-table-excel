@@ -73,3 +73,7 @@ GLFM（GitLab Flavored Markdown）の文書にある表を Excel で編集して
 - [設計と変換の規則](docs/reference/readme.md)
 - 検証記録（`repos/md-table-excel/docs/verification/readme.md`）: 手元の文書と comrak での確認、Excel の実機での確認とその手順
 - テストのコマンドと、変更するときの決まりは [AGENTS.md](AGENTS.md)
+
+## ライセンス
+
+md-table-excel は [MIT ライセンス](LICENSE)。同梱しているものの一覧は [licenses/manifest.json](licenses/manifest.json) にあり、原文は `mdtable --licenses` で出す。

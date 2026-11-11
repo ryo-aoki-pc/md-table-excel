@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ryo-aoki-pc/md-table-excel/internal/version"
 )
 
 func licenseManifest(t *testing.T) []LicenseComponent {
@@ -26,8 +28,13 @@ func licenseManifest(t *testing.T) []LicenseComponent {
 }
 
 func TestLicenseManifestFiles(t *testing.T) {
+	components := licenseManifest(t)
+	self := components[0]
+	if self.Name != "md-table-excel" || self.License != "MIT" || self.Version != version.Version || len(self.Files) != 1 || self.Files[0] != "LICENSE" {
+		t.Fatal("先頭は md-table-excel 自身の版と MIT ライセンスにしてください")
+	}
 	ids, files := map[string]bool{}, map[string]bool{}
-	for _, c := range licenseManifest(t) {
+	for _, c := range components {
 		id := c.Name + "@" + c.Version
 		if c.Name == "" || c.Version == "" || c.License == "" || len(c.Files) == 0 || ids[id] {
 			t.Errorf("部品の一覧が不正です: %+v", c)
@@ -183,9 +190,20 @@ func TestWriteLicenses(t *testing.T) {
 	if err := WriteLicenses(&out); err != nil {
 		t.Fatal(err)
 	}
+	self, err := ReadLicense("LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := "============================================================\n名前: md-table-excel\n版: " + version.Version + "\n種類: MIT\n\n--- LICENSE ---\n" + string(self)
+	if !strings.HasPrefix(out.String(), prefix) {
+		t.Fatal("出力の先頭に md-table-excel 自身の MIT ライセンスの全文がありません")
+	}
 	for _, c := range licenseManifest(t) {
 		v := c.Version
-		if c.Name == "Go" {
+		switch c.Name {
+		case "md-table-excel":
+			v = version.Version
+		case "Go":
 			v = strings.TrimPrefix(runtime.Version(), "go")
 		}
 		if !strings.Contains(out.String(), "名前: "+c.Name+"\n版: "+v+"\n種類: "+c.License+"\n") {
@@ -198,9 +216,22 @@ func TestWriteLicenses(t *testing.T) {
 			}
 		}
 	}
-	err := errors.New("試験用の書き込み失敗")
+	err = errors.New("試験用の書き込み失敗")
 	if !errors.Is(WriteLicenses(licenseErrorWriter{err}), err) {
 		t.Fatal("書き込みの失敗が返りません")
+	}
+}
+
+func TestWriteLicensesBuildVersion(t *testing.T) {
+	original := version.Version
+	t.Cleanup(func() { version.Version = original })
+	version.Version = "0.6.0-test"
+	var out bytes.Buffer
+	if err := WriteLicenses(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "名前: md-table-excel\n版: "+version.Version+"\n種類: MIT\n") {
+		t.Fatal("自身のライセンスにビルド時の版が使われていません")
 	}
 }
 

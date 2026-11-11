@@ -9,9 +9,11 @@ import (
 	"io/fs"
 	"runtime"
 	"strings"
+
+	"github.com/ryo-aoki-pc/md-table-excel/internal/version"
 )
 
-//go:embed licenses/manifest.json all:licenses/go all:licenses/openpyxl
+//go:embed LICENSE licenses/manifest.json all:licenses/go all:licenses/openpyxl
 var licenseFiles embed.FS
 
 // LicenseComponent は、出力順に並べる部品と原文の場所。
@@ -35,7 +37,7 @@ func LicenseManifest() ([]LicenseComponent, error) {
 
 // ReadLicense は、リポジトリからの相対名で埋め込んだ原文を読む。
 func ReadLicense(name string) ([]byte, error) {
-	if strings.HasPrefix(name, "licenses/go/") || strings.HasPrefix(name, "licenses/openpyxl/") {
+	if name == "LICENSE" || strings.HasPrefix(name, "licenses/go/") || strings.HasPrefix(name, "licenses/openpyxl/") {
 		return licenseFiles.ReadFile(name)
 	}
 	return nil, &fs.PathError{Op: "read", Path: name, Err: fs.ErrNotExist}
@@ -49,7 +51,10 @@ func WriteLicenses(w io.Writer) error {
 	}
 	for _, component := range components {
 		v := component.Version
-		if component.Name == "Go" {
+		switch component.Name {
+		case "md-table-excel":
+			v = version.Version
+		case "Go":
 			// 一覧は原文を写した元の版。表示はビルドに使った版。
 			v = strings.TrimPrefix(runtime.Version(), "go")
 		}

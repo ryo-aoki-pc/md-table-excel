@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	mdtable "github.com/ryo-aoki-pc/md-table-excel"
+	"github.com/ryo-aoki-pc/md-table-excel/internal/version"
 )
 
 func TestLicensesAction(t *testing.T) {
@@ -22,6 +23,14 @@ func TestLicensesAction(t *testing.T) {
 	}
 	if code != 0 || errout != "" || out != want.String() {
 		t.Fatalf("ライセンスの表示が正しくありません: 終了 %d、標準エラー %q", code, errout)
+	}
+	self, err := mdtable.ReadLicense("LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := "============================================================\n名前: md-table-excel\n版: " + version.Version + "\n種類: MIT\n\n--- LICENSE ---\n" + string(self)
+	if !strings.HasPrefix(out, prefix) {
+		t.Fatal("--licenses の先頭に md-table-excel 自身の MIT ライセンスの全文がありません")
 	}
 	if !strings.Contains(commandHelp[""], "--licenses") {
 		t.Fatal("使い方に --licenses がありません")
